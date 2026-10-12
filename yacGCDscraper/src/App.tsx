@@ -130,13 +130,25 @@ function ProposedUpdates({ fields, className = '' }: { fields: Enrichment; class
   return <section className={`proposed-updates ${className}`}><div className="proposed-updates-header"><span>Proposed updates</span><small>Not applied to YACReader</small></div><dl>{entries.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></section>
 }
 
+function AlterUpdateFields({ fields }: { fields: Enrichment }) {
+  const [expanded, setExpanded] = useState(false)
+  const count = enrichmentFields.filter(([field]) => fields[field]?.trim()).length
+  if (!count) return <>No metadata fields</>
+  return <details onToggle={(event) => setExpanded(event.currentTarget.open)}><summary>{count} fields</summary>{expanded && <dl>{proposedEntries(fields).map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}</dl>}</details>
+}
+
 function AlterUpdateDialog({ onClose, onRemoved }: { onClose: () => void; onRemoved: (comicInfoIds: number[]) => void }) {
   const api = window.libraryApi
   const [proposals, setProposals] = useState<GcdProposal[]>([])
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
   const [removing, setRemoving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const pageSize = 100
+  const pageCount = Math.max(1, Math.ceil(proposals.length / pageSize))
+  const currentPage = Math.min(page, pageCount - 1)
+  const visibleProposals = proposals.slice(currentPage * pageSize, (currentPage + 1) * pageSize)
 
   useEffect(() => {
     let active = true
@@ -168,9 +180,8 @@ function AlterUpdateDialog({ onClose, onRemoved }: { onClose: () => void; onRemo
       {error && <p className="match-error" role="alert">{error}</p>}
       {loading ? <p role="status">Loading proposals...</p> : proposals.length ? <table className="alter-update-table">
         <thead><tr><th scope="col">Select</th><th scope="col">Comic</th><th scope="col">GCD issue</th><th scope="col">Proposed updates</th></tr></thead>
-        <tbody>{proposals.map((proposal) => {
+        <tbody>{visibleProposals.map((proposal) => {
           const label = proposal.fileName || proposal.title || proposal.fields.title || `Comic info ID ${proposal.comicInfoId}`
-          const entries = proposedEntries(proposal.fields)
           return <tr key={proposal.comicInfoId}>
             <td><input type="checkbox" aria-label={`Select proposal for ${label} (${proposal.comicInfoId})`} checked={selected.has(proposal.comicInfoId)} disabled={removing} onChange={(event) => {
               const checked = event.target.checked
@@ -178,12 +189,12 @@ function AlterUpdateDialog({ onClose, onRemoved }: { onClose: () => void; onRemo
             }} /></td>
             <td><b>{label}</b><small>{proposal.path || `Comic info ID ${proposal.comicInfoId}`}</small></td>
             <td>{proposal.fields.gcdIssueId || 'Not set'}</td>
-            <td>{entries.length ? <details><summary>{entries.length} fields</summary><dl>{entries.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}</dl></details> : 'No metadata fields'}</td>
+            <td><AlterUpdateFields fields={proposal.fields} /></td>
           </tr>
         })}</tbody>
       </table> : <p role="status">No proposed updates.</p>}
     </div>
-    <footer className="dialog-footer"><button className="secondary-button" type="button" disabled={loading || removing || !selected.size} onClick={() => void removeSelected()}><Trash2 size={16} />{removing ? 'Removing...' : 'Remove'}</button><button className="secondary-button" type="button" disabled={removing} onClick={onClose}>Close</button></footer>
+    <footer className="dialog-footer"><nav className="dialog-navigation" aria-label="Proposal pages"><button className="icon-button" type="button" title="Previous page" aria-label="Previous proposal page" disabled={loading || removing || currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={16} /></button><span>{currentPage + 1} / {pageCount}</span><button className="icon-button" type="button" title="Next page" aria-label="Next proposal page" disabled={loading || removing || currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></button></nav><button className="secondary-button" type="button" disabled={loading || removing || !selected.size} onClick={() => void removeSelected()}><Trash2 size={16} />{removing ? 'Removing...' : `Remove${selected.size ? ` (${selected.size})` : ''}`}</button><button className="secondary-button" type="button" disabled={removing} onClick={onClose}>Close</button></footer>
   </section></div>
 }
 

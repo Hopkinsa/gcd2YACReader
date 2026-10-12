@@ -31,6 +31,33 @@ test('proposal removal deletes only selected records and the refreshed list reta
   assert.deepEqual(listGcdProposals(database), [])
 })
 
+test('proposal listing batches library lookups and preserves ordering, first comic, and missing records', { skip: !process.versions.electron }, async () => {
+  const { default: Database } = await import('better-sqlite3')
+  const database = new Database(':memory:')
+  const library = new Database(':memory:')
+  try {
+    database.exec('CREATE TABLE enrichment (comic_info_id INTEGER PRIMARY KEY, fields_json TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)')
+    library.exec(`CREATE TABLE comic (id INTEGER PRIMARY KEY, comicInfoId INTEGER, fileName TEXT, path TEXT);
+      CREATE TABLE comic_info (id INTEGER PRIMARY KEY, title TEXT);
+      INSERT INTO comic VALUES (3, 10, 'later.cbz', '/later'), (1, 10, 'first.cbz', '/first'),
+        (2, 20, 'second.cbz', '/second'), (4, 30, 'orphan.cbz', '/orphan');
+      INSERT INTO comic_info VALUES (10, 'First title'), (20, 'Second title');`)
+    for (const comicInfoId of [10, 20, 30, 99]) saveGcdProposal(database, comicInfoId, { title: `Proposal ${comicInfoId}` })
+    database.prepare("UPDATE enrichment SET updated_at = '2099-01-01' WHERE comic_info_id = 20").run()
+    let lookups = 0
+    const countedLibrary = { prepare: (sql) => { lookups += 1; return library.prepare(sql) } }
+    const original = library.prepare('SELECT c.fileName, c.path, ci.title FROM comic c LEFT JOIN comic_info ci ON ci.id = c.comicInfoId WHERE c.comicInfoId = ? ORDER BY c.id LIMIT 1')
+    const expected = listGcdProposals(database).map((proposal) => ({ ...proposal, ...original.get(proposal.comicInfoId) }))
+    assert.deepEqual(listGcdProposals(database, countedLibrary), expected)
+    assert.equal(lookups, 1)
+    assert.equal(expected[0].comicInfoId, 20)
+    assert.equal(expected[1].fileName, 'first.cbz')
+    database.exec('DELETE FROM enrichment')
+    assert.deepEqual(listGcdProposals(database, countedLibrary), [])
+    assert.equal(lookups, 1)
+  } finally { library.close(); database.close() }
+})
+
 test('proposal deletion is transactional in SQLite and leaves library metadata unchanged', { skip: !process.versions.electron }, async () => {
   const { default: Database } = await import('better-sqlite3')
   const database = new Database(':memory:')

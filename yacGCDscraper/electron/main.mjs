@@ -737,8 +737,7 @@ app.whenReady().then(() => {
     try {
       const library = openLibrary()
       try {
-        const findComic = library.prepare('SELECT c.fileName, c.path, ci.title FROM comic c LEFT JOIN comic_info ci ON ci.id = c.comicInfoId WHERE c.comicInfoId = ? ORDER BY c.id LIMIT 1')
-        return listGcdProposals(database).map((proposal) => ({ ...proposal, ...findComic.get(proposal.comicInfoId) }))
+        return listGcdProposals(database, library)
       } finally { library.close() }
     } finally { database.close() }
   })

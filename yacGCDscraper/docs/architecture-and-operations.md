@@ -86,7 +86,7 @@ The persistent link is `enrichment.comic_info_id` (YACReader `comic_info.id`) to
 
 The Admin menu contains expandable submenus: **Match** (Map library to GCD, Auto-match all), **Update** (Apply update, Alter update), and **Maintenance** (Export updates, Import updates, Sync from GCD). Only one submenu is expanded at a time.
 
-**Admin > Update > Alter update** lists all stored proposals, one row per comic, with a checkbox and expandable metadata fields. **Remove** deletes the checked proposal records and their stored GCD links in a single transaction, then refreshes the list and library proposal indicators. Unchecked records and native YACReader metadata remain unchanged. **Close** dismisses the window without removing proposals.
+**Admin > Update > Alter update** lists stored proposals in pages of up to 100 rows, one row per comic, with a checkbox and expandable metadata fields. Selections are retained across pages, and the Remove button shows the total selected count. Metadata details are rendered only when expanded, and comic identities are loaded in one bulk library query rather than one lookup per proposal. **Remove** deletes the checked proposal records and their stored GCD links across all pages in a single transaction, then refreshes the list and library proposal indicators. Unchecked records and native YACReader metadata remain unchanged. **Close** dismisses the window without removing proposals.
 
 Enable Advanced tools and choose **Admin > Match > Map library to GCD**. The left pane reuses the native library folder tree and lists individual comics in the selected folder. The right pane browses Publisher > Series > Issue with search and pages of up to 100 GCD records. Both selected records expose their identifying metadata and IDs.
 
