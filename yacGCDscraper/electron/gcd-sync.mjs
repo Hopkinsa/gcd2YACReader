@@ -186,9 +186,17 @@ export function saveGcdProposal(database, comicInfoId, fields) {
   database.prepare('INSERT INTO enrichment (comic_info_id, fields_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(comic_info_id) DO UPDATE SET fields_json = excluded.fields_json, updated_at = excluded.updated_at').run(comicInfoId, JSON.stringify(savedFields))
 }
 
-export function listGcdProposals(database) {
-  return database.prepare('SELECT comic_info_id AS comicInfoId, fields_json AS fields, updated_at AS updatedAt FROM enrichment ORDER BY updated_at DESC, comic_info_id').all()
+export function listGcdProposals(database, library) {
+  const proposals = database.prepare('SELECT comic_info_id AS comicInfoId, fields_json AS fields, updated_at AS updatedAt FROM enrichment ORDER BY updated_at DESC, comic_info_id').all()
     .map((row) => ({ ...row, fields: JSON.parse(row.fields) }))
+  if (!library || !proposals.length) return proposals
+  const comics = library.prepare(`SELECT c.comicInfoId, c.fileName, c.path, ci.title
+    FROM comic c LEFT JOIN comic_info ci ON ci.id = c.comicInfoId
+    WHERE c.id IN (SELECT MIN(id) FROM comic
+      WHERE comicInfoId IN (SELECT value FROM json_each(?)) GROUP BY comicInfoId)`)
+    .all(JSON.stringify(proposals.map((proposal) => proposal.comicInfoId)))
+  const comicsByInfoId = new Map(comics.map((comic) => [comic.comicInfoId, comic]))
+  return proposals.map((proposal) => ({ ...proposal, ...comicsByInfoId.get(proposal.comicInfoId) }))
 }
 
 export function removeGcdProposals(database, comicInfoIds) {
