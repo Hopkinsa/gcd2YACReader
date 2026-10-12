@@ -50,8 +50,9 @@ export function browseGcdRecords(database, { publisherId, seriesId, search = '',
   return { level, records: rows.slice(0, pageSize), page: currentPage, hasMore: rows.length > pageSize }
 }
 
-export async function createGcdMappings({ library, gcd, enrichment, comicId, gcdIssueId, matchFolder = false, overwriteExisting = false, resolveFields }) {
+export async function createGcdMappings({ library, gcd, enrichment, comicId, gcdIssueId, matchFolder = false, selectedComicIds, overwriteExisting = false, resolveFields }) {
   if (!Number.isSafeInteger(comicId) || comicId <= 0 || !Number.isSafeInteger(gcdIssueId) || gcdIssueId <= 0) throw new Error('Select a library comic and a GCD issue.')
+  if (selectedComicIds !== undefined && (!matchFolder || !Array.isArray(selectedComicIds) || !selectedComicIds.length || selectedComicIds.some((id) => !Number.isSafeInteger(id) || id <= 0))) throw new Error('Select valid library entries to map by issue.')
   const anchor = library.prepare(`SELECT ci.*, c.id AS comicId, c.parentId AS folderId, c.comicInfoId, c.fileName, c.path
     FROM comic c JOIN comic_info ci ON ci.id = c.comicInfoId WHERE c.id = ?`).get(comicId)
   const issue = gcd.prepare(`SELECT i.id, i.series_id AS seriesId FROM gcd_issue i
@@ -61,7 +62,8 @@ export async function createGcdMappings({ library, gcd, enrichment, comicId, gcd
   if (matchFolder && String(stored(anchor.comicInfoId).gcdIssueId || '') !== String(gcdIssueId)) throw new Error('Save the selected mapping before mapping the remaining folder.')
   const comics = matchFolder
     ? library.prepare(`SELECT ci.*, c.comicInfoId, c.fileName, c.path FROM comic c JOIN comic_info ci ON ci.id = c.comicInfoId
-      WHERE c.parentId = ? AND c.comicInfoId != ? GROUP BY ci.id ORDER BY c.id`).all(anchor.folderId, anchor.comicInfoId)
+      WHERE c.parentId = ? AND c.comicInfoId != ?${selectedComicIds === undefined ? '' : ' AND c.id IN (SELECT value FROM json_each(?))'} GROUP BY ci.id ORDER BY c.id`)
+      .all(...[anchor.folderId, anchor.comicInfoId, ...(selectedComicIds === undefined ? [] : [JSON.stringify(selectedComicIds)])])
     : [anchor]
   const candidates = new Map()
   if (matchFolder) {
