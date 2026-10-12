@@ -1,5 +1,5 @@
-import { useEffect, useState, type ComponentType } from 'react'
-import { BookOpen, ChevronLeft, ChevronRight, File, Folder, Link, Search, WandSparkles, X } from 'lucide-react'
+import { useEffect, useState, type ComponentType, type MouseEvent } from 'react'
+import { BookOpen, ChevronLeft, ChevronRight, File, Folder, Link, ListChecks, Search, WandSparkles, X } from 'lucide-react'
 import type { GcdBrowserRecord } from './library-api'
 
 type MappingFolder = { id: number; parentId: number; name: string; path: string; numChildren: number | null }
@@ -23,6 +23,8 @@ export default function MappingWindow({ FolderTree, onClose, onSaved }: {
   const [libraryPage, setLibraryPage] = useState(1)
   const [library, setLibrary] = useState<(LibraryPage & { requestKey: string }) | null>(null)
   const [comic, setComic] = useState<MappingComic | null>(null)
+  const [selectedComicIds, setSelectedComicIds] = useState<number[]>([])
+  const [selectionAnchorId, setSelectionAnchorId] = useState<number | null>(null)
   const [publisher, setPublisher] = useState<GcdBrowserRecord | null>(null)
   const [series, setSeries] = useState<GcdBrowserRecord | null>(null)
   const [issue, setIssue] = useState<GcdBrowserRecord | null>(null)
@@ -58,17 +60,35 @@ export default function MappingWindow({ FolderTree, onClose, onSaved }: {
     return () => { active = false }
   }, [api, publisher?.id, series?.id, gcdSearch, gcdPage, gcdRequest])
 
+  const clearSelection = () => {
+    setComic(null); setSelectedComicIds([]); setSelectionAnchorId(null); setResult(null)
+  }
+  const selectComic = (record: MappingComic, event: MouseEvent<HTMLButtonElement>) => {
+    const additive = event.metaKey || event.ctrlKey
+    const records = library?.comics || []
+    const anchorIndex = records.findIndex((entry) => entry.id === selectionAnchorId)
+    if (event.shiftKey && anchorIndex >= 0) {
+      const index = records.findIndex((entry) => entry.id === record.id)
+      const range = records.slice(Math.min(anchorIndex, index), Math.max(anchorIndex, index) + 1).map((entry) => entry.id)
+      setSelectedComicIds((current) => additive ? [...new Set([...current, ...range])] : range)
+    } else {
+      setSelectionAnchorId(record.id)
+      setSelectedComicIds((current) => additive ? current.includes(record.id) ? current.filter((id) => id !== record.id) : [...current, record.id] : [record.id])
+    }
+    if ((!additive && !event.shiftKey) || !comic) setComic(record)
+    setResult(null)
+  }
   const selectFolder = (id: number) => {
-    setFolderId(id); setLibraryPage(1); setComic(null); setResult(null)
+    setFolderId(id); setLibraryPage(1); clearSelection()
   }
   const navigateGcd = (nextPublisher: GcdBrowserRecord | null, nextSeries: GcdBrowserRecord | null) => {
     setPublisher(nextPublisher); setSeries(nextSeries); setIssue(null); setGcdPage(1); setResult(null)
   }
-  const save = async (matchFolder: boolean) => {
+  const save = async (matchFolder: boolean, selectedOnly = false) => {
     if (!comic || !issue) return
     setBusy(true); setError(null); setResult(null)
     try {
-      const outcome = await api.createMappings({ comicId: comic.id, gcdIssueId: issue.id, matchFolder, overwriteExisting: replaceExisting })
+      const outcome = await api.createMappings({ comicId: comic.id, gcdIssueId: issue.id, matchFolder, ...(selectedOnly ? { selectedComicIds } : {}), overwriteExisting: replaceExisting })
       setResult(outcome)
       if (!matchFolder) {
         setSavedPair(pair)
@@ -86,15 +106,15 @@ export default function MappingWindow({ FolderTree, onClose, onSaved }: {
     <div className="mapping-workspace" aria-busy={busy}>
       <section className="mapping-pane" aria-label="Library mapping browser">
         <header className="mapping-pane-heading"><h3>Library</h3><small>{comic ? `Comic info ID ${comic.comicInfoId}` : folderName}</small></header>
-        <label className="mapping-search"><Search size={15} /><input aria-label="Search library records" placeholder="Search library records" value={librarySearch} disabled={busy} onChange={(event) => { setLibrarySearch(event.target.value); setLibraryPage(1); setComic(null) }} /></label>
+        <label className="mapping-search"><Search size={15} /><input aria-label="Search library records" placeholder="Search library records" value={librarySearch} disabled={busy} onChange={(event) => { setLibrarySearch(event.target.value); setLibraryPage(1); clearSelection() }} /></label>
         <div className="mapping-library-navigation">
           <div className="mapping-folder-list"><FolderTree folders={library?.folders || []} selectedId={folderId} onSelect={(id) => { if (!busy) selectFolder(id) }} /></div>
-          <div className="mapping-record-list" role="list" aria-label="Library comics">
-            {libraryLoading ? <p className="mapping-empty" role="status">Loading comics...</p> : library?.comics.length ? library.comics.map((record) => <button type="button" role="listitem" key={record.id} disabled={busy} aria-current={comic?.id === record.id ? 'true' : undefined} className={`mapping-record ${comic?.id === record.id ? 'selected' : ''}`} onClick={() => { setComic(record); setResult(null) }}><File size={15} /><span><b>{record.fileName}</b><small>{[record.series, record.number && `#${record.number}`].filter(Boolean).join(' · ')}</small></span>{record.proposedFields?.gcdIssueId && <Link size={14} aria-label={`Mapped to GCD issue ${record.proposedFields.gcdIssueId}`} />}</button>) : <p className="mapping-empty">No comics found.</p>}
+          <div className="mapping-record-list" role="listbox" aria-multiselectable="true" aria-label="Library comics">
+            {libraryLoading ? <p className="mapping-empty" role="status">Loading comics...</p> : library?.comics.length ? library.comics.map((record) => <button type="button" role="option" key={record.id} disabled={busy} aria-selected={selectedComicIds.includes(record.id)} aria-current={comic?.id === record.id ? 'true' : undefined} className={`mapping-record ${selectedComicIds.includes(record.id) ? 'selected' : ''}`} onClick={(event) => selectComic(record, event)}><File size={15} /><span><b>{record.fileName}</b><small>{[record.series, record.number && `#${record.number}`].filter(Boolean).join(' · ')}</small></span>{record.proposedFields?.gcdIssueId && <Link size={14} aria-label={`Mapped to GCD issue ${record.proposedFields.gcdIssueId}`} />}</button>) : <p className="mapping-empty">No comics found.</p>}
           </div>
         </div>
-        <nav className="mapping-pagination" aria-label="Library record pages"><button type="button" title="Previous library page" aria-label="Previous library page" disabled={busy || libraryLoading || libraryPage <= 1} onClick={() => { setLibraryPage((current) => current - 1); setComic(null) }}><ChevronLeft size={16} /></button><span>{library?.total ?? 0} records</span><button type="button" title="Next library page" aria-label="Next library page" disabled={busy || libraryLoading || !library || library.page * library.pageSize >= library.total} onClick={() => { setLibraryPage((current) => current + 1); setComic(null) }}><ChevronRight size={16} /></button></nav>
-        <RecordDetails label="Selected library record" fields={[["File Path", comic?.path], ['Series title', comic?.series], ['Issue title', comic?.title], ['Issue number', comic?.number], ['Publisher', comic?.publisher], ['Date', comic?.date]]} />
+        <nav className="mapping-pagination" aria-label="Library record pages"><button type="button" title="Previous library page" aria-label="Previous library page" disabled={busy || libraryLoading || libraryPage <= 1} onClick={() => { setLibraryPage((current) => current - 1); clearSelection() }}><ChevronLeft size={16} /></button><span aria-live="polite">{library?.total ?? 0} records{selectedComicIds.length > 0 ? ` · ${selectedComicIds.length} selected` : ''}</span><button type="button" title="Next library page" aria-label="Next library page" disabled={busy || libraryLoading || !library || library.page * library.pageSize >= library.total} onClick={() => { setLibraryPage((current) => current + 1); clearSelection() }}><ChevronRight size={16} /></button></nav>
+        <RecordDetails label="Library mapping source" fields={[["File Path", comic?.path], ['Series title', comic?.series], ['Issue title', comic?.title], ['Issue number', comic?.number], ['Publisher', comic?.publisher], ['Date', comic?.date]]} />
         <p className="mapping-link-status">{comic?.proposedFields?.gcdIssueId ? `Linked GCD issue ID ${comic.proposedFields.gcdIssueId}` : comic ? 'Not mapped' : 'No comic selected'}</p>
       </section>
       <section className="mapping-pane" aria-label="GCD mapping browser">
@@ -109,8 +129,8 @@ export default function MappingWindow({ FolderTree, onClose, onSaved }: {
       </section>
     </div>
     <footer className="mapping-footer">
-      {result && <p role="status">{result.saved} mappings and proposals saved{result.scanned > 1 ? ` · ${result.skippedExisting} existing · ${result.ambiguous} ambiguous · ${result.unmatched} unmatched · ${result.failed} failed` : ''}</p>}
-      <div className="mapping-footer-actions"><label className="overwrite-toggle"><input type="checkbox" checked={replaceExisting} disabled={busy} onChange={(event) => setReplaceExisting(event.target.checked)} /><span>Replace existing mappings</span></label><button className="secondary-button" type="button" disabled={busy || !pair || pair !== savedPair} onClick={() => void save(true)}><WandSparkles size={16} />Map remaining folder by issue</button><button className="save-button editor-save-button" type="button" disabled={busy || !pair || libraryLoading || gcdLoading} onClick={() => void save(false)}><Link size={16} />{busy ? 'Saving...' : 'Save mapping and proposal'}</button></div>
+      {result && <p role="status">{result.saved} mappings and proposals saved · {result.scanned} scanned · {result.skippedExisting} existing · {result.ambiguous} ambiguous · {result.unmatched} unmatched · {result.failed} failed</p>}
+      <div className="mapping-footer-actions"><label className="overwrite-toggle"><input type="checkbox" checked={replaceExisting} disabled={busy} onChange={(event) => setReplaceExisting(event.target.checked)} /><span>Replace existing mappings</span></label><button className="secondary-button" type="button" disabled={busy || !pair || pair !== savedPair || libraryLoading || gcdLoading || !selectedComicIds.some((id) => id !== comic?.id)} onClick={() => void save(true, true)}><ListChecks size={16} />Map selected entries by issue</button><button className="secondary-button" type="button" disabled={busy || !pair || pair !== savedPair || libraryLoading || gcdLoading} onClick={() => void save(true)}><WandSparkles size={16} />Map remaining folder by issue</button><button className="save-button editor-save-button" type="button" disabled={busy || !pair || libraryLoading || gcdLoading} onClick={() => void save(false)}><Link size={16} />{busy ? 'Saving...' : 'Save mapping and proposal'}</button></div>
     </footer>
   </section></div>
 }

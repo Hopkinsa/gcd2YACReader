@@ -28,7 +28,7 @@ declare global {
     libraryApi: {
       loadLibrary: (filters: { folderId: number; page: number; pageSize: number; search: string; metadata: string; reading: string; publisher: string; gcdStatus: string; sort?: 'path' | 'title' }) => Promise<unknown>
       browseGcd: (options: { publisherId?: number; seriesId?: number; search?: string; page?: number }) => Promise<{ level: 'publishers' | 'series' | 'issues'; records: GcdBrowserRecord[]; page: number; hasMore: boolean }>
-      createMappings: (options: { comicId: number; gcdIssueId: number; matchFolder?: boolean; overwriteExisting?: boolean }) => Promise<{ scanned: number; saved: number; skippedExisting: number; ambiguous: number; unmatched: number; failed: number }>
+      createMappings: (options: { comicId: number; gcdIssueId: number; matchFolder?: boolean; selectedComicIds?: number[]; overwriteExisting?: boolean }) => Promise<{ scanned: number; saved: number; skippedExisting: number; ambiguous: number; unmatched: number; failed: number }>
       getComicMetadata: (comicId: number) => Promise<Record<string, unknown> | null>
       updateComicMetadata: (comicId: number, fields: Record<string, unknown>) => Promise<{ backupPath: string }>
       bulkUpdateComicMetadata: (comicInfoIds: number[], fields: Record<string, string>, incrementFields: string[]) => Promise<{ backupPath: string; updatedComics: number }>
