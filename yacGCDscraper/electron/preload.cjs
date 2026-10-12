@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('libraryApi', {
   extractPathMetadata: (options) => ipcRenderer.invoke('comic:extract-path-metadata', options),
   getEnrichment: (comicInfoId) => ipcRenderer.invoke('enrichment:get', comicInfoId),
   saveEnrichment: (comicInfoId, fields) => ipcRenderer.invoke('enrichment:save', comicInfoId, fields),
+  listProposals: () => ipcRenderer.invoke('enrichment:list'),
+  removeProposals: (comicInfoIds) => ipcRenderer.invoke('enrichment:remove', comicInfoIds),
   exportEnrichment: () => ipcRenderer.invoke('enrichment:export'),
   previewImport: () => ipcRenderer.invoke('enrichment:preview-import'),
   importEnrichment: () => ipcRenderer.invoke('enrichment:import'),
