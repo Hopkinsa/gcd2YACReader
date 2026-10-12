@@ -1,0 +1,71 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Compiled binary addons (https://nodejs.org/api/addons.html)
+build/Release
+
+# Node modules and dependency files
+node_modules/
+jspm_packages/
+node_modules/
+package-lock.json
+/yarn.lock
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Output of 'npm pack'
+*.tgz
+
+# environment variable files
+/.env
+.env
+.env.*
+!.env.example
+
+# Stores VSCode versions used for testing VSCode extensions
+.vscode-test
+/.vscode
+
+# Vite files
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+.vite/
+
+dist/
+/out-tsc/
+/tmp/
+
+reporting/
+
+# OS Specific
+.DS_Store
+Thumbs.db
+
+changes/
+/config.json
+data/*.db
+gcd_data/*.db
+yac_data/*.*
+yac_data/covers/*.jpg
+!yac_data/README.md

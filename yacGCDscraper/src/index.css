@@ -1,0 +1,6 @@
+:root { font-family: "Avenir Next", "Segoe UI", sans-serif; color: #172121; background: #e9edeb; font-synthesis: none; text-rendering: optimizeLegibility; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 0; overflow: hidden; }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+.import-dialog-body:has(.import-summary:not(.complete)) { display: none; }
