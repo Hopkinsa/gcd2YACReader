@@ -186,6 +186,17 @@ export function saveGcdProposal(database, comicInfoId, fields) {
   database.prepare('INSERT INTO enrichment (comic_info_id, fields_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(comic_info_id) DO UPDATE SET fields_json = excluded.fields_json, updated_at = excluded.updated_at').run(comicInfoId, JSON.stringify(savedFields))
 }
 
+export function listGcdProposals(database) {
+  return database.prepare('SELECT comic_info_id AS comicInfoId, fields_json AS fields, updated_at AS updatedAt FROM enrichment ORDER BY updated_at DESC, comic_info_id').all()
+    .map((row) => ({ ...row, fields: JSON.parse(row.fields) }))
+}
+
+export function removeGcdProposals(database, comicInfoIds) {
+  if (!Array.isArray(comicInfoIds) || comicInfoIds.some((comicInfoId) => !Number.isSafeInteger(comicInfoId) || comicInfoId <= 0)) throw new Error('Select valid proposal IDs to remove.')
+  const remove = database.prepare('DELETE FROM enrichment WHERE comic_info_id = ?')
+  return database.transaction(() => [...new Set(comicInfoIds)].reduce((removed, comicInfoId) => removed + remove.run(comicInfoId).changes, 0))()
+}
+
 export function persistGcdLinks(database, links) {
   const find = database.prepare('SELECT fields_json FROM enrichment WHERE comic_info_id = ?')
   const save = database.prepare('INSERT INTO enrichment (comic_info_id, fields_json) VALUES (?, ?) ON CONFLICT(comic_info_id) DO UPDATE SET fields_json = excluded.fields_json, updated_at = CURRENT_TIMESTAMP')

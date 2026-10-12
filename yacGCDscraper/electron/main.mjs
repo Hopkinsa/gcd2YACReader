@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { canonicalGcdCandidates } from './gcd-match-dedup.mjs'
 import { extractPathMetadata } from './path-metadata.mjs'
 import { browseGcdRecords, createGcdMappings } from './mapping-browser.mjs'
-import { applyGcdSyncChanges, buildGcdSyncPlan, extractGcdFields, fieldsFromMatch, gcdSyncChanges, normalizeGcdDate, persistGcdLinks, resolveGcdSyncCandidate, saveGcdProposal, yacReaderMappings } from './gcd-sync.mjs'
+import { applyGcdSyncChanges, buildGcdSyncPlan, extractGcdFields, fieldsFromMatch, gcdSyncChanges, listGcdProposals, normalizeGcdDate, persistGcdLinks, removeGcdProposals, resolveGcdSyncCandidate, saveGcdProposal, yacReaderMappings } from './gcd-sync.mjs'
 
 const appDirectory = path.dirname(fileURLToPath(import.meta.url))
 const developmentLibraryPath = path.resolve(appDirectory, '../../yac_data/library.ydb')
@@ -731,6 +731,20 @@ app.whenReady().then(() => {
   ipcMain.handle('enrichment:save', (_event, comicInfoId, fields) => {
     const database = enrichmentDatabase()
     try { saveEnrichmentFields(database, comicInfoId, fields) } finally { database.close() }
+  })
+  ipcMain.handle('enrichment:list', () => {
+    const database = enrichmentDatabase()
+    try {
+      const library = openLibrary()
+      try {
+        const findComic = library.prepare('SELECT c.fileName, c.path, ci.title FROM comic c LEFT JOIN comic_info ci ON ci.id = c.comicInfoId WHERE c.comicInfoId = ? ORDER BY c.id LIMIT 1')
+        return listGcdProposals(database).map((proposal) => ({ ...proposal, ...findComic.get(proposal.comicInfoId) }))
+      } finally { library.close() }
+    } finally { database.close() }
+  })
+  ipcMain.handle('enrichment:remove', (_event, comicInfoIds) => {
+    const database = enrichmentDatabase()
+    try { return { removed: removeGcdProposals(database, comicInfoIds) } } finally { database.close() }
   })
   ipcMain.handle('enrichment:export', async () => {
     const database = enrichmentDatabase()

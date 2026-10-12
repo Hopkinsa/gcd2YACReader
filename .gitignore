@@ -67,5 +67,6 @@ changes/
 data/*.db
 gcd_data/*.db
 yac_data/*.*
+yac_data/id
 yac_data/covers/*.jpg
 !yac_data/README.md

@@ -15,12 +15,14 @@ import {
   RefreshCw,
   Search,
   SlidersHorizontal,
+  Trash2,
   Upload,
   WandSparkles,
   X,
 } from 'lucide-react'
 import './App.css'
 import MappingWindow from './MappingWindow'
+import type { GcdProposal } from './library-api'
 
 type FolderRecord = {
   id: number
@@ -126,6 +128,63 @@ function ProposedUpdates({ fields, className = '' }: { fields: Enrichment; class
   const entries = proposedEntries(fields)
   if (!entries.length) return null
   return <section className={`proposed-updates ${className}`}><div className="proposed-updates-header"><span>Proposed updates</span><small>Not applied to YACReader</small></div><dl>{entries.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></section>
+}
+
+function AlterUpdateDialog({ onClose, onRemoved }: { onClose: () => void; onRemoved: (comicInfoIds: number[]) => void }) {
+  const api = window.libraryApi
+  const [proposals, setProposals] = useState<GcdProposal[]>([])
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [loading, setLoading] = useState(true)
+  const [removing, setRemoving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    api.listProposals().then((rows) => { if (active) setProposals(rows) })
+      .catch((failure: unknown) => { if (active) setError(failure instanceof Error ? failure.message : 'Could not load proposals.') })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [api])
+
+  const removeSelected = async () => {
+    if (!selected.size || removing) return
+    const comicInfoIds = [...selected]
+    setRemoving(true)
+    setError(null)
+    try {
+      await api.removeProposals(comicInfoIds)
+      setProposals((current) => current.filter((proposal) => !selected.has(proposal.comicInfoId)))
+      setSelected(new Set())
+      onRemoved(comicInfoIds)
+      setProposals(await api.listProposals())
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not remove or refresh proposals.')
+    } finally { setRemoving(false) }
+  }
+
+  return <div className="modal-backdrop"><section className="match-dialog alter-update-dialog" role="dialog" aria-modal="true" aria-labelledby="alter-update-title" aria-busy={loading || removing}>
+    <header className="dialog-header"><h2 id="alter-update-title">Alter update</h2><span>{proposals.length.toLocaleString()} proposals</span></header>
+    <div className="alter-update-body">
+      {error && <p className="match-error" role="alert">{error}</p>}
+      {loading ? <p role="status">Loading proposals...</p> : proposals.length ? <table className="alter-update-table">
+        <thead><tr><th scope="col">Select</th><th scope="col">Comic</th><th scope="col">GCD issue</th><th scope="col">Proposed updates</th></tr></thead>
+        <tbody>{proposals.map((proposal) => {
+          const label = proposal.fileName || proposal.title || proposal.fields.title || `Comic info ID ${proposal.comicInfoId}`
+          const entries = proposedEntries(proposal.fields)
+          return <tr key={proposal.comicInfoId}>
+            <td><input type="checkbox" aria-label={`Select proposal for ${label} (${proposal.comicInfoId})`} checked={selected.has(proposal.comicInfoId)} disabled={removing} onChange={(event) => {
+              const checked = event.target.checked
+              setSelected((current) => { const next = new Set(current); if (checked) next.add(proposal.comicInfoId); else next.delete(proposal.comicInfoId); return next })
+            }} /></td>
+            <td><b>{label}</b><small>{proposal.path || `Comic info ID ${proposal.comicInfoId}`}</small></td>
+            <td>{proposal.fields.gcdIssueId || 'Not set'}</td>
+            <td>{entries.length ? <details><summary>{entries.length} fields</summary><dl>{entries.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}</dl></details> : 'No metadata fields'}</td>
+          </tr>
+        })}</tbody>
+      </table> : <p role="status">No proposed updates.</p>}
+    </div>
+    <footer className="dialog-footer"><button className="secondary-button" type="button" disabled={loading || removing || !selected.size} onClick={() => void removeSelected()}><Trash2 size={16} />{removing ? 'Removing...' : 'Remove'}</button><button className="secondary-button" type="button" disabled={removing} onClick={onClose}>Close</button></footer>
+  </section></div>
 }
 
 function LibraryProposalSummary({ comics }: { comics: Comic[] }) {
@@ -404,7 +463,7 @@ function HelpPage({ onClose }: { onClose: () => void }) {
         <section id="help-edit"><p className="eyebrow">02 / EDIT</p><h2>Correct library metadata</h2><div className="help-grid"><div><h3>Quick list edits</h3><p>In List view, edit title, issue, volume, or publisher directly in a row. Press Enter or move focus away to save the value.</p></div><div><h3>Full record editor</h3><p>Select a comic, then use the information button in its detail panel. The tabs organize general, plot, author, publishing, note, and matching fields. Previous and next follow the current List sort order. Save writes to the YACReader library and creates a backup first.</p></div><div><h3>Extract from paths</h3><p>When viewing a folder, use <b>Extract from paths</b> to infer series, title, numbering, volume, story arc, and alternate-series data. It fills only blank fields unless overwrite is selected.</p></div><div><h3>Pending updates</h3><p>Eligible proposed values appear in the library, Details, and editor before they are applied. A field is shown only when it can fill an empty supported YACReader value.</p></div><div><h3>Bulk edits</h3><p>With two or more comics selected, choose <b>Bulk edit</b>. Enable only the fields you intend to overwrite; issue and volume can be incremented in the current list order.</p></div></div></section>
         <section id="help-match"><p className="eyebrow">03 / GCD MATCHING</p><h2>Review before applying a match</h2><div className="help-grid"><div><h3>Manual match</h3><p>Enable <b>Advanced tools</b>, select a comic, and open its full record editor. Use the matching tab to enter its series title, issue, and optional volume. Select <b>Overwrite existing proposals</b> only when replacing a saved proposal. <b>Review candidates</b> lets you inspect the result before saving. Review navigation keeps the List sort order that was active when matching began.</p></div><div><h3>Canonical candidates</h3><p>Cover variants are grouped under their GCD root issue. When one canonical result is fully confident and every alternative is less confident, only that result is returned.</p></div><div><h3>Automatic match</h3><p><b>Auto-match</b> on a folder or selected comics saves only one unambiguous exact result. Existing proposals are skipped unless <b>Overwrite existing proposals</b> is selected. Selected-comic matching can use title, volume, and publisher refinements.</p></div><div><h3>Proposed data</h3><p>Saving a selected match through the editor updates its mapped YACReader fields and stores the complete proposal. Automatic matching and the Admin mapping window save proposals without changing library metadata. Credits, genre, characters, and synopsis combine all stories; notes combine issue and story notes. GCD format and rating populate Format and Age rating where available.</p></div></div></section>
         <section id="help-admin"><p className="eyebrow">04 / ADMIN MENU</p><h2>Manage mappings and proposals</h2><p><b>Advanced tools</b> is off on each launch. Enable it in the toolbar to access Admin, GCD matching, automatic matching, path extraction, and bulk edits.</p><div className="help-grid">
-          <div><h3>Map library to GCD</h3><p>Open <b>Admin &gt; Map library to GCD</b>. Navigate library folders and comics on the left, ordered by file path A-Z without regard to case. Navigate GCD publishers, series, and issues on the right. The detail boxes show file path, series and issue titles, number, publisher, and date; GCD also shows Indicia Publisher and on-sale date.</p></div>
+          <div><h3>Map library to GCD</h3><p>Open <b>Admin &gt; Match &gt; Map library to GCD</b>. Navigate library folders and comics on the left, ordered by file path A-Z without regard to case. Navigate GCD publishers, series, and issues on the right. The detail boxes show file path, series and issue titles, number, publisher, and date; GCD also shows Indicia Publisher and on-sale date.</p></div>
           <div><h3>Search GCD records</h3><p>Search matches publisher names, series titles, and issue titles from any navigation level, with issue numbers also searchable within a series. Library and GCD searches remain active while navigating folders, publishers, series, and breadcrumbs. Clear the corresponding search text box to remove its filter.</p></div>
           <div><h3>Save a mapping</h3><p>Select one library comic and one GCD issue, then choose <b>Save mapping and proposal</b>. This stores the persistent link between the comic info ID and GCD issue ID, together with the extracted metadata proposal. It does not change YACReader metadata; use <b>Apply updates</b> later. Enable <b>Replace existing mappings</b> only to replace a saved link and its proposal.</p></div>
           <div><h3>Map the remaining folder</h3><p>After saving the selected pair, choose <b>Map remaining folder by issue</b>. Only other comics directly in that library folder are considered, not child folders. Their normalized issue numbers are matched against the selected GCD series, with cover variants grouped under their root issue. Unmatched and ambiguous issues are skipped. Existing mappings are preserved unless replacement is enabled; the result reports saved and skipped records.</p></div>
@@ -430,8 +489,10 @@ function App() {
   const [showFilters, setShowFilters] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
+  const [adminSubmenu, setAdminSubmenu] = useState<'match' | 'update' | 'maintenance' | null>(null)
   const [advancedToolsVisible, setAdvancedToolsVisible] = useState(false)
   const [mappingWindowOpen, setMappingWindowOpen] = useState(false)
+  const [alterUpdateOpen, setAlterUpdateOpen] = useState(false)
   const editorTabs = allEditorTabs.filter((tab) => advancedToolsVisible || tab.id !== 'matching')
   const adminActionsRef = useRef<HTMLDivElement>(null)
   const initializedSelectedComicIdRef = useRef<number | null>(null)
@@ -901,6 +962,7 @@ function App() {
     if (visible) return
     setAdminOpen(false)
     setBulkEditorOpen(false)
+    setAlterUpdateOpen(false)
     setPathExtractionConfirmationOpen(false)
     setAutoMatchConfirmationOpen(false)
     setAutoMatchTarget(null)
@@ -915,6 +977,11 @@ function App() {
   return (
     <main className={`app-shell ${advancedToolsVisible ? '' : 'advanced-tools-hidden'} ${panels.folders ? '' : 'folders-hidden'} ${panels.covers ? '' : 'covers-hidden'} ${panels.list ? '' : 'list-hidden'} ${panels.details ? '' : 'details-hidden'}`}>
       {advancedToolsVisible && mappingWindowOpen && <MappingWindow FolderTree={FolderTree} onClose={() => setMappingWindowOpen(false)} onSaved={() => setLibraryRevision((revision) => revision + 1)} />}
+      {advancedToolsVisible && alterUpdateOpen && <AlterUpdateDialog onClose={() => setAlterUpdateOpen(false)} onRemoved={(comicInfoIds) => {
+        if (selectedComic && comicInfoIds.includes(selectedComic.comicInfoId)) setEnrichment({})
+        setImportPlan(null)
+        setLibraryRevision((revision) => revision + 1)
+      }} />}
       {bulkEditorOpen && <BulkMetadataDialog comicCount={selectedComics.length} saving={bulkEditorSaving} error={bulkEditorError} onCancel={() => setBulkEditorOpen(false)} onSave={(fields, incrementFields) => void saveBulkMetadata(fields, incrementFields)} />}
       {pathExtractionConfirmationOpen && selectedFolder && <PathExtractionConfirmation folderName={selectedFolder.name} onCancel={() => setPathExtractionConfirmationOpen(false)} onContinue={(overwriteExisting, recursive) => { setPathExtractionConfirmationOpen(false); void extractPathMetadata(selectedFolder.id, overwriteExisting, recursive) }} />}
       {editorDialogOpen && selectedComic && editorTab === 'matching' && <div className="modal-backdrop editor-match-backdrop" role="presentation" onMouseDown={() => setEditorTab('general')}><section className="editor-match-dialog" role="dialog" aria-modal="true" aria-labelledby="editor-match-title" onMouseDown={(event) => event.stopPropagation()}><header className="dialog-header"><div><p className="eyebrow">GCD MATCHING</p><h2 id="editor-match-title">Find comic data</h2></div><button className="dialog-close" type="button" title="Return to comic information" onClick={() => setEditorTab('general')}><X size={18} /></button></header><div className="editor-match-body"><p>Search the GCD database using the comic's title, issue, and volume.</p><div className="match-parameters"><label>Title<input value={matchParameters.title} onChange={(event) => setMatchParameters((current) => ({ ...current, title: event.target.value }))} placeholder="Series title" /></label><label>Issue<input value={matchParameters.number} onChange={(event) => setMatchParameters((current) => ({ ...current, number: event.target.value }))} inputMode="decimal" placeholder="Issue number" /></label><label>Volume<input value={matchParameters.volume} onChange={(event) => setMatchParameters((current) => ({ ...current, volume: event.target.value }))} inputMode="numeric" placeholder="Volume" /></label></div><label className="overwrite-toggle"><input type="checkbox" checked={overwriteExistingProposals} onChange={(event) => setOverwriteExistingProposals(event.target.checked)} /><span>Overwrite existing proposals</span></label>{matchError && <p className="match-error">{matchError}</p>}</div><footer className="dialog-footer"><button className="secondary-button" type="button" onClick={() => setEditorTab('general')}>Back</button><button className="auto-match-button" type="button" disabled={matching} onClick={() => { setEditorTab('general'); void findMatches() }}>{matching ? 'Searching...' : 'Find matches'}</button></footer></section></div>}
@@ -931,7 +998,33 @@ function App() {
           <button className={`icon-button ${showFilters ? 'active' : ''}`} type="button" title="Toggle filters" onClick={() => setShowFilters((shown) => !shown)}><SlidersHorizontal size={18} /></button>
           <button className="icon-button" type="button" title="Open help" aria-label="Open help" onClick={() => setHelpOpen(true)}><Info size={18} /></button>
           <label className="advanced-tools-toggle"><input type="checkbox" checked={advancedToolsVisible} disabled={autoMatching || matching || gcdSyncBusy || importing || pathExtracting || bulkEditorSaving || editorSaving} onChange={(event) => toggleAdvancedTools(event.target.checked)} /><span>Advanced tools</span></label>
-          <div className="admin-actions" ref={adminActionsRef}><button className="admin-menu-button" type="button" aria-expanded={adminOpen} aria-haspopup="menu" onClick={() => setAdminOpen((open) => !open)}>Admin <ChevronDown size={15} /></button>{adminOpen && <div className="admin-menu" role="menu"><button type="button" role="menuitem" disabled={!libraryApi || autoMatching || gcdSyncBusy} onClick={() => { setAdminOpen(false); setMappingWindowOpen(true) }}><BookOpen size={16} />Map library to GCD</button><button type="button" role="menuitem" disabled={!libraryApi || autoMatching} onClick={() => openAutoMatch({ folderId: 1, label: 'the entire library', isLibrary: true })}><WandSparkles size={16} />Auto-match all</button><button type="button" role="menuitem" disabled={!libraryApi || autoMatching || gcdSyncBusy} onClick={() => void showGcdSyncPreview()}><RefreshCw size={16} />Sync from GCD</button><button type="button" role="menuitem" disabled={!libraryApi} onClick={() => { setAdminOpen(false); void showImportPreview() }}><Upload size={16} />Apply updates</button><button type="button" role="menuitem" disabled={!libraryApi} onClick={() => { setAdminOpen(false); void libraryApi.exportEnrichment() }}><Download size={16} />Export updates</button><button type="button" role="menuitem" disabled={!libraryApi} onClick={() => void importUpdatePackage()}><Upload size={16} />Import updates</button></div>}</div>
+          <div className="admin-actions" ref={adminActionsRef}>
+            <button className="admin-menu-button" type="button" aria-expanded={adminOpen} aria-haspopup="menu" onClick={() => { setAdminSubmenu(null); setAdminOpen((open) => !open) }}>Admin <ChevronDown size={15} /></button>
+            {adminOpen && <div className="admin-menu" role="menu" aria-label="Admin">
+              <div className="admin-menu-group" role="none">
+                <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={adminSubmenu === 'match'} aria-controls={adminSubmenu === 'match' ? 'admin-match-menu' : undefined} onClick={() => setAdminSubmenu((current) => current === 'match' ? null : 'match')}><WandSparkles size={16} />Match<ChevronRight className="admin-submenu-arrow" size={15} /></button>
+                {adminSubmenu === 'match' && <div id="admin-match-menu" className="admin-submenu" role="menu" aria-label="Match">
+                  <button type="button" role="menuitem" disabled={!libraryApi || autoMatching || gcdSyncBusy} onClick={() => { setAdminOpen(false); setMappingWindowOpen(true) }}><BookOpen size={16} />Map library to GCD</button>
+                  <button type="button" role="menuitem" disabled={!libraryApi || autoMatching} onClick={() => openAutoMatch({ folderId: 1, label: 'the entire library', isLibrary: true })}><WandSparkles size={16} />Auto-match all</button>
+                </div>}
+              </div>
+              <div className="admin-menu-group" role="none">
+                <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={adminSubmenu === 'update'} aria-controls={adminSubmenu === 'update' ? 'admin-update-menu' : undefined} onClick={() => setAdminSubmenu((current) => current === 'update' ? null : 'update')}><Upload size={16} />Update<ChevronRight className="admin-submenu-arrow" size={15} /></button>
+                {adminSubmenu === 'update' && <div id="admin-update-menu" className="admin-submenu" role="menu" aria-label="Update">
+                  <button type="button" role="menuitem" disabled={!libraryApi} onClick={() => { setAdminOpen(false); void showImportPreview() }}><Upload size={16} />Apply update</button>
+                  <button type="button" role="menuitem" disabled={!libraryApi} onClick={() => { setAdminOpen(false); setAlterUpdateOpen(true) }}><Pencil size={16} />Alter update</button>
+                </div>}
+              </div>
+              <div className="admin-menu-group" role="none">
+                <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={adminSubmenu === 'maintenance'} aria-controls={adminSubmenu === 'maintenance' ? 'admin-maintenance-menu' : undefined} onClick={() => setAdminSubmenu((current) => current === 'maintenance' ? null : 'maintenance')}><SlidersHorizontal size={16} />Maintenance<ChevronRight className="admin-submenu-arrow" size={15} /></button>
+                {adminSubmenu === 'maintenance' && <div id="admin-maintenance-menu" className="admin-submenu" role="menu" aria-label="Maintenance">
+                  <button type="button" role="menuitem" disabled={!libraryApi} onClick={() => { setAdminOpen(false); void libraryApi.exportEnrichment() }}><Download size={16} />Export updates</button>
+                  <button type="button" role="menuitem" disabled={!libraryApi} onClick={() => void importUpdatePackage()}><Upload size={16} />Import updates</button>
+                  <button type="button" role="menuitem" disabled={!libraryApi || autoMatching || gcdSyncBusy} onClick={() => void showGcdSyncPreview()}><RefreshCw size={16} />Sync from GCD</button>
+                </div>}
+              </div>
+            </div>}
+          </div>
         </header>
         <div className="panel-toggles" aria-label="Workspace panels"><button className={panels.folders ? 'active' : ''} type="button" onClick={() => setPanels((current) => ({ ...current, folders: !current.folders }))}>Folders</button><button className={panels.covers ? 'active' : ''} type="button" onClick={() => setPanels((current) => ({ ...current, covers: !current.covers }))}>Covers</button><button className={panels.list ? 'active' : ''} type="button" onClick={() => setPanels((current) => ({ ...current, list: !current.list }))}>List</button><button className={panels.details ? 'active' : ''} type="button" onClick={() => setPanels((current) => ({ ...current, details: !current.details }))}>Details</button></div>
         {showFilters && <div className="filter-bar">

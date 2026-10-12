@@ -14,6 +14,15 @@ export type GcdBrowserRecord = {
   onSaleDate?: string
 }
 
+export type GcdProposal = {
+  comicInfoId: number
+  fields: Record<string, string>
+  updatedAt: string
+  fileName?: string
+  path?: string
+  title?: string | null
+}
+
 declare global {
   interface Window {
     libraryApi: {
@@ -26,6 +35,8 @@ declare global {
       extractPathMetadata: (options: { folderId: number; recursive?: boolean; overwriteExisting?: boolean }) => Promise<{ scanned: number; updatedComics: number; updatedFields: number; skippedExisting: number; backupPath: string | null }>
       getEnrichment: (comicInfoId: number) => Promise<Record<string, string>>
       saveEnrichment: (comicInfoId: number, fields: Record<string, string>) => Promise<void>
+      listProposals: () => Promise<GcdProposal[]>
+      removeProposals: (comicInfoIds: number[]) => Promise<{ removed: number }>
       exportEnrichment: () => Promise<void>
       previewImport: () => Promise<unknown>
       importEnrichment: () => Promise<unknown>

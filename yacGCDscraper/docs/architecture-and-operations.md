@@ -84,7 +84,11 @@ The persistent link is `enrichment.comic_info_id` (YACReader `comic_info.id`) to
 
 ### Manual Mapping Browser
 
-Enable Advanced tools and choose **Admin > Map library to GCD**. The left pane reuses the native library folder tree and lists individual comics in the selected folder. The right pane browses Publisher > Series > Issue with search and pages of up to 100 GCD records. Both selected records expose their identifying metadata and IDs.
+The Admin menu contains expandable submenus: **Match** (Map library to GCD, Auto-match all), **Update** (Apply update, Alter update), and **Maintenance** (Export updates, Import updates, Sync from GCD). Only one submenu is expanded at a time.
+
+**Admin > Update > Alter update** lists all stored proposals, one row per comic, with a checkbox and expandable metadata fields. **Remove** deletes the checked proposal records and their stored GCD links in a single transaction, then refreshes the list and library proposal indicators. Unchecked records and native YACReader metadata remain unchanged. **Close** dismisses the window without removing proposals.
+
+Enable Advanced tools and choose **Admin > Match > Map library to GCD**. The left pane reuses the native library folder tree and lists individual comics in the selected folder. The right pane browses Publisher > Series > Issue with search and pages of up to 100 GCD records. Both selected records expose their identifying metadata and IDs.
 
 The `gcd:browse` IPC handler reads only the source GCD database. `gcd:create-mappings` validates the selected native comic and GCD issue using their actual database records and stores the persistent link plus the complete extracted proposal in `enrichment.db`. It does not modify `library.ydb` or GCD. Once the anchor pair has been saved, the folder action matches only other comics directly in its native parent folder against issues in the anchor's GCD series. Numeric and decimal issue numbers are normalized, filename/path extraction fills missing native numbers, canonical cover variants collapse to their root issue, and non-unique matches are skipped. Existing links are protected by default; unlinked existing proposal values are retained when batch matching. An explicit replacement opt-in allows links/proposals to be replaced. A concurrent link change aborts the proposal transaction. Saved proposals are available through the normal Apply updates workflow.
 

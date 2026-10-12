@@ -5,11 +5,50 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { execFile } from 'node:child_process'
-import { applyGcdSyncChanges, buildGcdSyncPlan, extractGcdFields, fieldsFromMatch, gcdSyncChanges, persistGcdLinks, resolveGcdSyncCandidate, saveGcdProposal, yacReaderMappings } from './gcd-sync.mjs'
+import { applyGcdSyncChanges, buildGcdSyncPlan, extractGcdFields, fieldsFromMatch, gcdSyncChanges, listGcdProposals, persistGcdLinks, removeGcdProposals, resolveGcdSyncCandidate, saveGcdProposal, yacReaderMappings } from './gcd-sync.mjs'
 import { browseGcdRecords, createGcdMappings } from './mapping-browser.mjs'
 
 const mappings = { series: 'series', script: 'writer', storySynopsis: 'synopsis' }
 const columns = new Set(['series', 'writer'])
+
+test('proposal removal deletes only selected records and the refreshed list retains unchecked proposals', () => {
+  const rows = new Map([1, 2, 3].map((comicInfoId) => [comicInfoId, { comicInfoId, fields: JSON.stringify({ gcdIssueId: String(comicInfoId), title: `Comic ${comicInfoId}` }), updatedAt: '2026-10-12' }]))
+  let transactions = 0
+  const database = {
+    prepare: (sql) => sql.startsWith('SELECT') ? { all: () => [...rows.values()] } : {
+      run: (comicInfoId) => ({ changes: rows.delete(comicInfoId) ? 1 : 0 }),
+    },
+    transaction: (callback) => () => { transactions += 1; return callback() },
+  }
+  assert.equal(listGcdProposals(database).length, 3)
+  assert.equal(removeGcdProposals(database, [1, 1, 3, 99]), 2)
+  assert.equal(transactions, 1)
+  assert.deepEqual(listGcdProposals(database), [{ comicInfoId: 2, fields: { gcdIssueId: '2', title: 'Comic 2' }, updatedAt: '2026-10-12' }])
+  for (const invalid of [null, '2', [2, -1], [2, '3'], [2, 1.5], [2, Number.MAX_SAFE_INTEGER + 1]]) assert.throws(() => removeGcdProposals(database, invalid), /valid proposal IDs/)
+  assert.equal(rows.has(2), true)
+  assert.equal(removeGcdProposals(database, []), 0)
+  assert.equal(removeGcdProposals(database, [2]), 1)
+  assert.deepEqual(listGcdProposals(database), [])
+})
+
+test('proposal deletion is transactional in SQLite and leaves library metadata unchanged', { skip: !process.versions.electron }, async () => {
+  const { default: Database } = await import('better-sqlite3')
+  const database = new Database(':memory:')
+  try {
+    database.exec(`CREATE TABLE enrichment (comic_info_id INTEGER PRIMARY KEY, fields_json TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE comic_info (id INTEGER PRIMARY KEY, title TEXT);
+      INSERT INTO comic_info VALUES (1, 'Manual title');`)
+    for (const comicInfoId of [1, 2, 3]) saveGcdProposal(database, comicInfoId, { gcdIssueId: String(comicInfoId), title: `Proposal ${comicInfoId}` })
+    assert.deepEqual(listGcdProposals(database).map((proposal) => proposal.comicInfoId), [1, 2, 3])
+    database.exec("CREATE TRIGGER protect_proposal BEFORE DELETE ON enrichment WHEN OLD.comic_info_id = 2 BEGIN SELECT RAISE(ABORT, 'Deletion blocked'); END;")
+    assert.throws(() => removeGcdProposals(database, [1, 2]), /Deletion blocked/)
+    assert.equal(listGcdProposals(database).length, 3)
+    database.exec('DROP TRIGGER protect_proposal')
+    assert.equal(removeGcdProposals(database, [1, 3]), 2)
+    assert.deepEqual(listGcdProposals(database).map((proposal) => proposal.fields), [{ gcdIssueId: '2', title: 'Proposal 2' }])
+    assert.equal(database.prepare('SELECT title FROM comic_info WHERE id = 1').get().title, 'Manual title')
+  } finally { database.close() }
+})
 
 test('GCD dates use the first of a known month and June 30 for year-only values', () => {
   for (const [input, expected] of [
