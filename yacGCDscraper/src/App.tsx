@@ -409,7 +409,7 @@ function MatchReviewDialog({ reviewComic, matches, selectedMatch, matching, para
   </div>
 }
 
-function LibraryList({ comics, selectedComicIds, drafts, sort, onSort, onSelect, onDraftChange, onCommit, onContextMenu }: { comics: Comic[]; selectedComicIds: Set<number>; drafts: RowDrafts; sort: LibrarySort; onSort: (field: LibrarySortField) => void; onSelect: (comic: Comic, event: React.MouseEvent<HTMLElement>) => void; onDraftChange: (comic: Comic, field: EditableRowField, value: string) => void; onCommit: (comic: Comic, field: EditableRowField, value: string) => void; onContextMenu: (comic: Comic, event: React.MouseEvent<HTMLElement>) => void }) {
+function LibraryList({ comics, selectedComicIds, advancedToolsVisible, drafts, sort, onSort, onSelect, onSelectAll, onDraftChange, onCommit, onContextMenu }: { comics: Comic[]; selectedComicIds: Set<number>; advancedToolsVisible: boolean; drafts: RowDrafts; sort: LibrarySort; onSort: (field: LibrarySortField) => void; onSelect: (comic: Comic, event: React.MouseEvent<HTMLElement>) => void; onSelectAll: () => void; onDraftChange: (comic: Comic, field: EditableRowField, value: string) => void; onCommit: (comic: Comic, field: EditableRowField, value: string) => void; onContextMenu: (comic: Comic, event: React.MouseEvent<HTMLElement>) => void }) {
   const [pathTooltip, setPathTooltip] = useState<{ text: string; x: number; y: number } | null>(null)
   const [columnMenuOpen, setColumnMenuOpen] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<Set<LibrarySortField>>(() => new Set(['path', 'series', 'title', 'number', 'volume', 'publisher', 'date']))
@@ -447,6 +447,7 @@ function LibraryList({ comics, selectedComicIds, drafts, sort, onSort, onSelect,
     return next
   })
   return <section className="library-list" aria-label="Folder contents" style={{ '--library-list-width': `${displayedColumns.reduce((total, { field }) => total + columnWidths[field], 34)}px` } as React.CSSProperties}>
+    {advancedToolsVisible && <div className="library-selection-toolbar"><button className="secondary-button" type="button" onClick={onSelectAll} disabled={!comics.length} title="Select all rows in the current list page">Select all rows</button></div>}
     <div className="library-list-header" role="row" style={{ gridTemplateColumns }}>{displayedColumns.map(({ field, label, minimumWidth }) => <div className="library-list-header-cell" key={field}><button type="button" className={sort.field === field ? 'active' : ''} onClick={() => onSort(field)}>{label}<ArrowUpDown size={13} /></button><span className="column-resizer" role="separator" aria-label={`Resize ${label} column`} aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => resizeColumn(field, minimumWidth, event)} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setColumnWidths((current) => ({ ...current, [field]: Math.max(minimumWidth, current[field] + (event.key === 'ArrowLeft' ? -12 : 12)) })) } }} /></div>)}<div className="library-column-controls"><button className="row-actions" type="button" title="Choose visible columns" aria-label="Choose visible columns" aria-expanded={columnMenuOpen} onClick={() => setColumnMenuOpen((open) => !open)}><SlidersHorizontal size={16} /></button>{columnMenuOpen && <div className="column-menu" role="menu" aria-label="Visible columns">{columns.map(({ field, label }) => <label key={field}><input type="checkbox" checked={visibleColumns.has(field)} disabled={visibleColumns.has(field) && visibleColumns.size === 1} onChange={() => toggleColumn(field)} /><span>{label}</span></label>)}</div>}</div></div>
     <div className="library-list-rows">{comics.map((comic) => <div key={comic.id} className={`library-row ${selectedComicIds.has(comic.id) ? 'selected' : ''}`} style={{ gridTemplateColumns }} role="button" tabIndex={0} onClick={(event) => onSelect(comic, event)} onContextMenu={(event) => onContextMenu(comic, event)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onSelect(comic, event as unknown as React.MouseEvent<HTMLElement>) }}>
       {displayedColumns.map(({ field }) => editableFields.has(field) ? <input key={field} aria-label={`${field} for ${comic.title || comic.fileName}`} value={drafts[comic.id]?.[field as EditableRowField] ?? comic[field as EditableRowField] ?? ''} onClick={(event) => event.stopPropagation()} onChange={(event) => onDraftChange(comic, field as EditableRowField, event.target.value)} onBlur={(event) => onCommit(comic, field as EditableRowField, event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') onDraftChange(comic, field as EditableRowField, comic[field as EditableRowField] ?? '') }} /> : field === 'path' ? <span key={field} className="path-cell" title={comic.path} onMouseEnter={(event) => setPathTooltip({ text: comic.path, x: event.clientX, y: event.clientY })} onMouseMove={(event) => setPathTooltip({ text: comic.path, x: event.clientX, y: event.clientY })} onMouseLeave={() => setPathTooltip(null)}>{comic.path}</span> : <span key={field}>{comic[field] || 'Not set'}</span>)}
@@ -926,6 +927,13 @@ function App() {
     setSelectedComic(next.has(comic.id) ? comic : data?.comics.find((candidate) => next.has(candidate.id)) ?? null)
   }
   const updateLibrarySort = (field: LibrarySortField) => setLibrarySort((current) => current.field === field ? { field, direction: current.direction === 'ascending' ? 'descending' : 'ascending' } : { field, direction: 'ascending' })
+  const selectAllRows = () => {
+    if (!advancedToolsVisible || !sortedComics.length) return
+    const comic = sortedComics.find((candidate) => candidate.id === selectedComic?.id) ?? sortedComics[0]
+    setSelectedComicIds(new Set(sortedComics.map((candidate) => candidate.id)))
+    setSelectedComic(comic)
+    setSelectionAnchorId(comic.id)
+  }
   const updateRowDraft = (comic: Comic, field: EditableRowField, value: string) => setRowDrafts((current) => ({ ...current, [comic.id]: { ...current[comic.id], [field]: value } }))
   const clearRowDraft = (comic: Comic, field: EditableRowField) => setRowDrafts((current) => {
     const next = { ...current }
@@ -966,7 +974,7 @@ function App() {
     event.preventDefault()
     setRowContext({ comic, x: event.clientX, y: event.clientY })
   }
-  const selectedComics = data?.comics.filter((comic) => selectedComicIds.has(comic.id)) ?? []
+  const selectedComics = sortedComics.filter((comic) => selectedComicIds.has(comic.id))
   const selectedAutoMatchTarget = selectedComics.length ? { label: `${selectedComics.length} selected ${selectedComics.length === 1 ? 'file' : 'files'}`, isLibrary: false, comicInfoIds: selectedComics.map((comic) => comic.comicInfoId) } : null
 
   const toggleAdvancedTools = (visible: boolean) => {
@@ -1054,7 +1062,7 @@ function App() {
             <div className="comic-caption"><b>{comic.title || comic.fileName.replace(/\.[^.]+$/, '')}</b><span>{[comic.publisher, comic.number && `#${comic.number}`].filter(Boolean).join(' · ') || 'Metadata pending'}</span></div>
           </button>)}</div>}
         {data && <LibraryProposalSummary comics={data.comics} />}
-        {data && <LibraryList comics={sortedComics} selectedComicIds={selectedComicIds} drafts={rowDrafts} sort={librarySort} onSort={updateLibrarySort} onSelect={selectComic} onDraftChange={updateRowDraft} onCommit={(comic, field, value) => void commitRowEdit(comic, field, value)} onContextMenu={openRowContext} />}
+        {data && <LibraryList comics={sortedComics} selectedComicIds={selectedComicIds} advancedToolsVisible={advancedToolsVisible} drafts={rowDrafts} sort={librarySort} onSort={updateLibrarySort} onSelect={selectComic} onSelectAll={selectAllRows} onDraftChange={updateRowDraft} onCommit={(comic, field, value) => void commitRowEdit(comic, field, value)} onContextMenu={openRowContext} />}
         {filters.folderId === allComicsFolderId && data && data.total > data.pageSize && <nav className="pagination" aria-label="Comic pages"><button type="button" title="Previous page" aria-label="Previous page" disabled={data.page === 1} onClick={() => updateFilter({ page: data.page - 1 })}><ChevronLeft size={17} /></button><span>Page {data.page} of {pageCount}</span><button type="button" title="Next page" aria-label="Next page" disabled={data.page === pageCount} onClick={() => updateFilter({ page: data.page + 1 })}><ChevronRight size={17} /></button></nav>}
       </section>
       <aside className="detail-pane">
