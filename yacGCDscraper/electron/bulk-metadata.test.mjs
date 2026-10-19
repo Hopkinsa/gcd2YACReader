@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { runInNewContext } from 'node:vm'
+import ts from 'typescript'
 
 // Exercise the IPC implementation without starting Electron or opening a user's library.
 const source = readFileSync(new URL('./main.mjs', import.meta.url), 'utf8')
@@ -34,6 +35,34 @@ function createHarness() {
   })
   return { update, writes, backups }
 }
+
+test('bulk auto-increments follow the visible list sort, not loaded or selection order', async () => {
+  const app = ts.createSourceFile('App.tsx', readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const initializers = new Map()
+  function visit(node) {
+    if (ts.isVariableDeclaration(node) && ['sortedComics', 'selectedComics'].includes(node.name.getText(app))) {
+      initializers.set(node.name.getText(app), node.initializer.getText(app))
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(app)
+  assert.equal(initializers.size, 2)
+  const comics = [
+    { id: 1, comicInfoId: 10, number: '10' },
+    { id: 2, comicInfoId: 20, number: '2' },
+    { id: 3, comicInfoId: 30, number: '1' },
+    { id: 4, comicInfoId: 40, number: '3' },
+  ]
+  for (const [direction, expectedIds] of [['ascending', [30, 20, 10]], ['descending', [10, 20, 30]]]) {
+    const selected = runInNewContext(`const sortedComics = ${initializers.get('sortedComics')}; ${initializers.get('selectedComics')}`, {
+      data: { comics }, librarySort: { field: 'number', direction }, selectedComicIds: new Set([2, 1, 3]),
+    })
+    const { update, writes } = createHarness()
+    await update(selected.map((comic) => comic.comicInfoId), { arcNumber: '5', alternateNumber: '10' }, ['arcNumber', 'alternateNumber'])
+    assert.deepEqual(writes.map(({ id }) => id), expectedIds)
+    assert.deepEqual(writes.map(({ fields }) => [fields.arcNumber, fields.alternateNumber]), [['5', '10'], ['6', '11'], ['7', '12']])
+  }
+})
 
 test('bulk edits save arc and alternative series with independently incremented numbers in selection order', async () => {
   const { update, writes, backups } = createHarness()
