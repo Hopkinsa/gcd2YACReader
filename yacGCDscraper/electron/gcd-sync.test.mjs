@@ -411,6 +411,35 @@ test('manual folder mappings save proposals and skip ambiguous, existing, and un
   } finally { database.close() }
 })
 
+test('GCD issue browsing sorts numerically before sort code and ID, including across pages', { skip: !process.versions.electron }, async () => {
+  const { default: Database } = await import('better-sqlite3')
+  const database = new Database(':memory:')
+  try {
+    database.exec(`CREATE TABLE gcd_issue (id INTEGER PRIMARY KEY, series_id INTEGER, number TEXT, variant_of_id INTEGER, deleted INTEGER DEFAULT 0, sort_code INTEGER, title TEXT, variant_name TEXT, indicia_publisher_id INTEGER, on_sale_date TEXT);
+      CREATE TABLE gcd_series (id INTEGER PRIMARY KEY, publisher_id INTEGER, name TEXT, deleted INTEGER);
+      CREATE TABLE gcd_publisher (id INTEGER PRIMARY KEY, name TEXT);
+      CREATE TABLE gcd_indicia_publisher (id INTEGER PRIMARY KEY, name TEXT);
+      INSERT INTO gcd_series VALUES (1, 1, 'Series', 0);
+      INSERT INTO gcd_publisher VALUES (1, 'Publisher');
+      INSERT INTO gcd_issue (id, series_id, number, sort_code, variant_of_id) VALUES
+        (1, 1, '1', 0, NULL), (2, 1, '-1', 20, NULL), (3, 1, '0', 10, NULL),
+        (4, 1, '10', 1, NULL), (5, 1, '2', 2, NULL), (6, 1, '1.5', 3, NULL),
+        (9, 1, '1', -1, 1), (8, 1, '1', -1, 1);`)
+    assert.deepEqual(browseGcdRecords(database, { seriesId: 1 }).records.map(({ id }) => id), [2, 3, 8, 9, 1, 6, 5, 4])
+    assert.deepEqual(browseGcdRecords(database, { seriesId: 1, search: '1' }).records.map(({ id }) => id), [2, 8, 9, 1, 6, 4])
+
+    database.exec('DELETE FROM gcd_issue')
+    const insert = database.prepare('INSERT INTO gcd_issue (id, series_id, number, sort_code) VALUES (?, 1, ?, ?)')
+    for (let number = 100; number >= -1; number--) insert.run(number + 2, String(number), 100 - number)
+    const firstPage = browseGcdRecords(database, { seriesId: 1 })
+    const secondPage = browseGcdRecords(database, { seriesId: 1, page: 2 })
+    assert.equal(firstPage.hasMore, true)
+    assert.equal(firstPage.records.length, 100)
+    assert.equal(secondPage.hasMore, false)
+    assert.deepEqual([...firstPage.records, ...secondPage.records].map(({ number }) => number), Array.from({ length: 102 }, (_, index) => String(index - 1)))
+  } finally { database.close() }
+})
+
 test('native sync updates only approved fields and rolls back stale previews', { skip: !process.versions.electron }, async () => {
   const { default: Database } = await import('better-sqlite3')
   const database = new Database(':memory:')
