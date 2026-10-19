@@ -25,7 +25,7 @@ export function browseGcdRecords(database, { publisherId, seriesId, search = '',
       LEFT JOIN gcd_indicia_publisher ip ON ip.id = i.indicia_publisher_id
       WHERE i.series_id = ? AND +i.deleted = 0 AND +s.deleted = 0
         AND (i.number LIKE ? ESCAPE '\\' OR i.title LIKE ? ESCAPE '\\' OR s.name LIKE ? ESCAPE '\\' OR p.name LIKE ? ESCAPE '\\')
-      ORDER BY i.sort_code, i.id LIMIT ? OFFSET ?`).all(seriesId, term, term, term, term, pageSize + 1, (currentPage - 1) * pageSize)
+      ORDER BY CAST(i.number AS REAL), i.sort_code, i.id LIMIT ? OFFSET ?`).all(seriesId, term, term, term, term, pageSize + 1, (currentPage - 1) * pageSize)
   } else if (publisherId !== undefined) {
     if (!Number.isSafeInteger(publisherId) || publisherId <= 0) throw new Error('Select a valid GCD publisher.')
     level = 'series'

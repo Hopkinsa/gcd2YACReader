@@ -330,13 +330,14 @@ async function bulkUpdateComicMetadata(comicInfoIds, fields, incrementFields = [
   const ids = [...new Set(comicInfoIds)]
   if (!ids.length || ids.some((comicInfoId) => !Number.isInteger(comicInfoId))) throw new Error('Select one or more valid comics to update.')
   if (!fields || typeof fields !== 'object' || Array.isArray(fields)) throw new Error('Bulk metadata must be an object.')
-  const allowedFields = new Set(['series', 'title', 'number', 'volume', 'publisher'])
+  const allowedFields = new Set(['series', 'title', 'number', 'volume', 'publisher', 'storyArc', 'arcNumber', 'alternateSeries', 'alternateNumber'])
   const updates = Object.entries(fields).filter(([field]) => allowedFields.has(field))
   if (!updates.length) throw new Error('Choose at least one metadata field to update.')
   const increments = new Set(incrementFields)
-  if ([...increments].some((field) => field !== 'number' && field !== 'volume')) throw new Error('Only issue and volume can be incremented.')
+  const incrementLabels = { number: 'Issue', volume: 'Volume', arcNumber: 'Arc number', alternateNumber: 'Alternative number' }
+  if ([...increments].some((field) => !Object.hasOwn(incrementLabels, field))) throw new Error('Only issue, volume, arc number, and alternative number can be incremented.')
   for (const field of increments) {
-    if (!Number.isFinite(Number(fields[field]))) throw new Error(`${field === 'number' ? 'Issue' : 'Volume'} must start with a number when incrementing.`)
+    if (!Number.isFinite(Number(fields[field]))) throw new Error(`${incrementLabels[field]} must start with a number when incrementing.`)
   }
 
   const backupPath = `${libraryPath}.yacgcd-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.ydb`
