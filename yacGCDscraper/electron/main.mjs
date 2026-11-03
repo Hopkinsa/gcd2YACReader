@@ -289,8 +289,8 @@ async function saveComicMetadata(comicInfoId, fields) {
 
   const updates = Object.entries(fields).filter(([field]) => editableComicInfoFields.has(field))
   if (!updates.length) throw new Error('No editable comic metadata was provided.')
-  const date = fields.date === null || fields.date === undefined ? '' : String(fields.date)
-  if (date && !/^(?:\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{1,4})$/.test(date)) throw new Error('Date must use YYYY-MM-DD or day/month/year format.')
+  const date = normalizeGcdDate(fields.date)
+  if (hasValue(fields.date) && !date) throw new Error('Date must be a valid calendar date (YYYY-MM-DD).')
   if (fields.type !== undefined && (!Number.isInteger(Number(fields.type)) || Number(fields.type) < 0 || Number(fields.type) > 4)) throw new Error('Comic type is invalid.')
 
   const backupPath = `${libraryPath}.yacgcd-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.ydb`
@@ -308,6 +308,7 @@ async function saveComicMetadata(comicInfoId, fields) {
     if (!writable.length) throw new Error('This YACReader library does not support the requested metadata fields.')
     const assignments = writable.map(([field]) => `${field} = ?`)
     const values = writable.map(([field, value]) => {
+      if (field === 'date') return date
       if (field === 'color') return value ? 1 : 0
       if (field === 'type') return Number(value)
       return value === null || value === undefined ? '' : String(value)
@@ -442,6 +443,20 @@ function saveEnrichmentFields(database, comicInfoId, fields) {
   saveGcdProposal(database, comicInfoId, normalizedFields)
 }
 
+async function applyGcdProposalMetadata(proposals) {
+  if (!proposals.length) return { updatedFields: 0, updatedComics: 0, backupPath: null }
+  const fieldsById = new Map(proposals.map(({ comicInfoId, fields }) => [comicInfoId, fields]))
+  const library = openLibrary()
+  let plan
+  try {
+    const columns = new Set(library.prepare('PRAGMA table_info(comic_info)').all().map((column) => column.name))
+    const comics = library.prepare('SELECT *, id AS comicInfoId FROM comic_info WHERE id IN (SELECT value FROM json_each(?))').all(JSON.stringify([...fieldsById.keys()]))
+    if (comics.length !== fieldsById.size) throw new Error('A mapped comic is no longer available. Reload and try again.')
+    plan = await buildGcdSyncPlan({ comics, columns, mappings: yacReaderMappings, resolveFields: (comic) => fieldsById.get(comic.comicInfoId) })
+  } finally { library.close() }
+  return applyGcdSync(plan, true)
+}
+
 async function automaticallyProposeExactMatches(onProgress, { folderId = libraryRootFolderId, comicInfoIds = [], recursive = true, overwriteExisting = false, refinement = {} } = {}) {
   const library = openLibrary()
   const enrichment = enrichmentDatabase()
@@ -458,11 +473,11 @@ async function automaticallyProposeExactMatches(onProgress, { folderId = library
     const comics = selectedComicInfoIds.length
       ? library.prepare(`SELECT c.comicInfoId, c.fileName, c.path, ci.title, ci.number, ci.volume, ci.publisher
         FROM comic c JOIN comic_info ci ON ci.id = c.comicInfoId
-        WHERE c.comicInfoId IN (${selectedComicInfoIds.map(() => '?').join(', ')})`).all(...selectedComicInfoIds)
+        WHERE c.comicInfoId IN (${selectedComicInfoIds.map(() => '?').join(', ')}) GROUP BY ci.id`).all(...selectedComicInfoIds)
       : library.prepare(`${recursive ? descendantQuery : ''}
       SELECT c.comicInfoId, c.fileName, c.path, ci.title, ci.number, ci.volume, ci.publisher
       FROM comic c JOIN comic_info ci ON ci.id = c.comicInfoId
-      WHERE c.parentId ${recursive ? 'IN (SELECT id FROM descendants)' : '= ?'}`).all(targetFolderId)
+      WHERE c.parentId ${recursive ? 'IN (SELECT id FROM descendants)' : '= ?'} GROUP BY ci.id`).all(targetFolderId)
     const worklist = overwriteExisting ? comics : comics.filter((comic) => !existingIds.has(comic.comicInfoId))
     const proposed = []
     let unmatched = 0
@@ -497,7 +512,8 @@ async function automaticallyProposeExactMatches(onProgress, { folderId = library
     }
     const saveProposals = enrichment.transaction(() => proposed.forEach(({ comicInfoId, fields }) => saveEnrichmentFields(enrichment, comicInfoId, fields)))
     saveProposals()
-    return { scanned: worklist.length, proposed: proposed.length, unmatched }
+    const metadata = overwriteExisting === true ? await applyGcdProposalMetadata(proposed) : {}
+    return { scanned: worklist.length, proposed: proposed.length, unmatched, ...metadata }
   } finally {
     gcd.close()
     enrichment.close()
@@ -683,6 +699,7 @@ app.whenReady().then(() => {
     const enrichment = enrichmentDatabase()
     try {
       return await createGcdMappings({ ...options, library, gcd, enrichment,
+        applyMetadata: applyGcdProposalMetadata,
         resolveFields: (issueId) => {
           const match = gcd.prepare(`${gcdIssueSelect} WHERE i.id = ? AND +i.deleted = 0 AND +s.deleted = 0`).get(issueId)
           return match ? extractGcdFields(gcd, { ...match, stories: storiesForGcdIssue(gcd, issueId) }) : null

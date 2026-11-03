@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type ComponentType, type MouseEvent } from 'react'
 import { BookOpen, ChevronLeft, ChevronRight, File, Folder, Link, ListChecks, Search, WandSparkles, X } from 'lucide-react'
 import type { GcdBrowserRecord } from './library-api'
 
@@ -12,19 +12,25 @@ function RecordDetails({ label, fields }: { label: string; fields: [string, unkn
   return <section className="mapping-details" aria-label={label}><dl>{fields.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{String(value ?? '').trim() || 'Not set'}</dd></div>)}</dl></section>
 }
 
-export default function MappingWindow({ FolderTree, onClose, onSaved }: {
+export default function MappingWindow({ FolderTree, initialComicId, initialFolderId, onClose, onSaved }: {
   FolderTree: ComponentType<{ folders: MappingFolder[]; selectedId: number; onSelect: (folderId: number) => void }>
+  initialComicId?: number
+  initialFolderId: number
   onClose: () => void
   onSaved: () => void
 }) {
   const api = window.libraryApi
-  const [folderId, setFolderId] = useState(1)
+  const [startingComicId] = useState(initialComicId)
+  const [initializing, setInitializing] = useState(Boolean(startingComicId))
+  const [folderId, setFolderId] = useState(initialFolderId)
+  const libraryListRef = useRef<HTMLDivElement>(null)
+  const revealInitialComic = useRef(Boolean(startingComicId))
   const [librarySearch, setLibrarySearch] = useState('')
   const [libraryPage, setLibraryPage] = useState(1)
   const [library, setLibrary] = useState<(LibraryPage & { requestKey: string }) | null>(null)
   const [comic, setComic] = useState<MappingComic | null>(null)
-  const [selectedComicIds, setSelectedComicIds] = useState<number[]>([])
-  const [selectionAnchorId, setSelectionAnchorId] = useState<number | null>(null)
+  const [selectedComicIds, setSelectedComicIds] = useState<number[]>(startingComicId ? [startingComicId] : [])
+  const [selectionAnchorId, setSelectionAnchorId] = useState<number | null>(startingComicId ?? null)
   const [publisher, setPublisher] = useState<GcdBrowserRecord | null>(null)
   const [series, setSeries] = useState<GcdBrowserRecord | null>(null)
   const [issue, setIssue] = useState<GcdBrowserRecord | null>(null)
@@ -45,12 +51,34 @@ export default function MappingWindow({ FolderTree, onClose, onSaved }: {
   const gcdLoading = gcd?.requestKey !== gcdRequest
 
   useEffect(() => {
+    if (!startingComicId) return
+    let active = true
+    api.getComicMetadata(startingComicId)
+      .then((metadata) => { if (active && typeof metadata?.folderId === 'number') setFolderId(metadata.folderId) })
+      .catch((failure: Error) => { if (active) setError(failure.message) })
+      .finally(() => { if (active) setInitializing(false) })
+    return () => { active = false }
+  }, [api, startingComicId])
+
+  useEffect(() => {
+    if (initializing) return
     let active = true
     api.loadLibrary({ folderId, page: libraryPage, pageSize: 100, search: librarySearch, metadata: 'all', reading: 'all', publisher: 'all', gcdStatus: 'all', sort: 'path' })
-      .then((data) => { if (active) setLibrary({ ...data as LibraryPage, requestKey: libraryRequest }) })
+      .then((data) => {
+        if (!active) return
+        const page = data as LibraryPage
+        setLibrary({ ...page, requestKey: libraryRequest })
+        setComic((current) => page.comics.find((record) => record.id === (current?.id ?? (revealInitialComic.current ? startingComicId : undefined))) ?? current)
+      })
       .catch((failure: Error) => { if (active) { setError(failure.message); setLibrary({ folders: [], comics: [], page: 1, pageSize: 100, total: 0, requestKey: libraryRequest }) } })
     return () => { active = false }
-  }, [api, folderId, libraryPage, librarySearch, libraryRequest])
+  }, [api, folderId, libraryPage, librarySearch, libraryRequest, initializing, startingComicId])
+
+  useEffect(() => {
+    if (libraryLoading || !revealInitialComic.current) return
+    libraryListRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    revealInitialComic.current = false
+  }, [libraryLoading])
 
   useEffect(() => {
     let active = true
@@ -109,8 +137,8 @@ export default function MappingWindow({ FolderTree, onClose, onSaved }: {
         <label className="mapping-search"><Search size={15} /><input aria-label="Search library records" placeholder="Search library records" value={librarySearch} disabled={busy} onChange={(event) => { setLibrarySearch(event.target.value); setLibraryPage(1); clearSelection() }} /></label>
         <div className="mapping-library-navigation">
           <div className="mapping-folder-list"><FolderTree folders={library?.folders || []} selectedId={folderId} onSelect={(id) => { if (!busy) selectFolder(id) }} /></div>
-          <div className="mapping-record-list" role="listbox" aria-multiselectable="true" aria-label="Library comics">
-            {libraryLoading ? <p className="mapping-empty" role="status">Loading comics...</p> : library?.comics.length ? library.comics.map((record) => <button type="button" role="option" key={record.id} disabled={busy} aria-selected={selectedComicIds.includes(record.id)} aria-current={comic?.id === record.id ? 'true' : undefined} className={`mapping-record ${selectedComicIds.includes(record.id) ? 'selected' : ''}`} onClick={(event) => selectComic(record, event)}><File size={15} /><span><b>{record.fileName}</b><small>{[record.series, record.number && `#${record.number}`].filter(Boolean).join(' · ')}</small></span>{record.proposedFields?.gcdIssueId && <Link size={14} aria-label={`Mapped to GCD issue ${record.proposedFields.gcdIssueId}`} />}</button>) : <p className="mapping-empty">No comics found.</p>}
+          <div ref={libraryListRef} className="mapping-record-list" role="listbox" aria-busy={libraryLoading} aria-multiselectable="true" aria-label="Library comics">
+            {!library ? <p className="mapping-empty" role="status">Loading comics...</p> : library.comics.length ? library.comics.map((record) => <button type="button" role="option" key={record.id} disabled={busy || libraryLoading} aria-selected={selectedComicIds.includes(record.id)} aria-current={comic?.id === record.id ? 'true' : undefined} className={`mapping-record ${selectedComicIds.includes(record.id) ? 'selected' : ''}`} onClick={(event) => selectComic(record, event)}><File size={15} /><span><b>{record.fileName}</b><small>{[record.series, record.number && `#${record.number}`].filter(Boolean).join(' · ')}</small></span>{record.proposedFields?.gcdIssueId && <Link size={14} aria-label={`Mapped to GCD issue ${record.proposedFields.gcdIssueId}`} />}</button>) : <p className="mapping-empty">No comics found.</p>}
           </div>
         </div>
         <nav className="mapping-pagination" aria-label="Library record pages"><button type="button" title="Previous library page" aria-label="Previous library page" disabled={busy || libraryLoading || libraryPage <= 1} onClick={() => { setLibraryPage((current) => current - 1); clearSelection() }}><ChevronLeft size={16} /></button><span aria-live="polite">{library?.total ?? 0} records{selectedComicIds.length > 0 ? ` · ${selectedComicIds.length} selected` : ''}</span><button type="button" title="Next library page" aria-label="Next library page" disabled={busy || libraryLoading || !library || library.page * library.pageSize >= library.total} onClick={() => { setLibraryPage((current) => current + 1); clearSelection() }}><ChevronRight size={16} /></button></nav>
@@ -129,8 +157,8 @@ export default function MappingWindow({ FolderTree, onClose, onSaved }: {
       </section>
     </div>
     <footer className="mapping-footer">
-      {result && <p role="status">{result.saved} mappings and proposals saved · {result.scanned} scanned · {result.skippedExisting} existing · {result.ambiguous} ambiguous · {result.unmatched} unmatched · {result.failed} failed</p>}
-      <div className="mapping-footer-actions"><label className="overwrite-toggle"><input type="checkbox" checked={replaceExisting} disabled={busy} onChange={(event) => setReplaceExisting(event.target.checked)} /><span>Replace existing mappings</span></label><button className="secondary-button" type="button" disabled={busy || !pair || pair !== savedPair || libraryLoading || gcdLoading || !selectedComicIds.some((id) => id !== comic?.id)} onClick={() => void save(true, true)}><ListChecks size={16} />Map selected entries by issue</button><button className="secondary-button" type="button" disabled={busy || !pair || pair !== savedPair || libraryLoading || gcdLoading} onClick={() => void save(true)}><WandSparkles size={16} />Map remaining folder by issue</button><button className="save-button editor-save-button" type="button" disabled={busy || !pair || libraryLoading || gcdLoading} onClick={() => void save(false)}><Link size={16} />{busy ? 'Saving...' : 'Save mapping and proposal'}</button></div>
+      {result && <p role="status">{result.saved} mappings and proposals saved · {result.scanned} scanned · {result.skippedExisting} existing · {result.ambiguous} ambiguous · {result.unmatched} unmatched · {result.failed} failed{result.updatedComics !== undefined ? ` · ${result.updatedComics} library records updated` : ''}</p>}
+      <div className="mapping-footer-actions"><label className="overwrite-toggle"><input type="checkbox" checked={replaceExisting} disabled={busy} onChange={(event) => setReplaceExisting(event.target.checked)} /><span>Replace existing mappings and library metadata</span></label><button className="secondary-button" type="button" disabled={busy || !pair || pair !== savedPair || libraryLoading || gcdLoading || !selectedComicIds.some((id) => id !== comic?.id)} onClick={() => void save(true, true)}><ListChecks size={16} />Map selected entries by issue</button><button className="secondary-button" type="button" disabled={busy || !pair || pair !== savedPair || libraryLoading || gcdLoading} onClick={() => void save(true)}><WandSparkles size={16} />Map remaining folder by issue</button><button className="save-button editor-save-button" type="button" disabled={busy || !pair || libraryLoading || gcdLoading} onClick={() => void save(false)}><Link size={16} />{busy ? 'Saving...' : 'Save mapping and proposal'}</button></div>
     </footer>
   </section></div>
 }
