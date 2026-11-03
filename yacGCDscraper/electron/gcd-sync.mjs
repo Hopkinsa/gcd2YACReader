@@ -9,16 +9,31 @@ function combinedValues(values, separator = '; ', split = false) {
 
 export function normalizeGcdDate(value) {
   const text = String(value ?? '').replaceAll('[', '').replaceAll(']', '').trim()
-  if (/^\d{4}$/.test(text)) return `30/06/${text}`
-  const yearFirst = text.match(/^(\d{4})[-/.](\d{1,2})(?:[-/.]00)?$/)
+  const fullYearFirst = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/)
+  const fullDayFirst = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/)
+  const yearFirst = text.match(/^(\d{4})[-/.](\d{1,2})$/)
   const monthFirst = text.match(/^(\d{1,2})[-/.](\d{4})$/)
-  const namedMonth = text.match(/^([a-z]+)\.?[\s,/-]+(\d{4})$/i)
+  const namedMonth = text.match(/^([a-z]+)\.?[\s,/-]+(?:(\d{1,2})[\s,/-]+)?(\d{4})$/i)
+  const dayNamedMonth = text.match(/^(\d{1,2})[\s/-]+([a-z]+)\.?[\s,/-]+(\d{4})$/i)
   const months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
-  const month = yearFirst ? Number(yearFirst[2]) : monthFirst ? Number(monthFirst[1]) : namedMonth ? months.findIndex((name) => name === namedMonth[1].toLowerCase() || name.slice(0, 3) === namedMonth[1].toLowerCase() || (name === 'september' && namedMonth[1].toLowerCase() === 'sept')) + 1 : 0
-  const year = yearFirst?.[1] || monthFirst?.[2] || namedMonth?.[2]
-  if (year && month >= 1 && month <= 12) return `01/${String(month).padStart(2, '0')}/${year}`
-  if (yearFirst && month === 0) return `30/06/${yearFirst[1]}`
-  return text
+  const monthName = (namedMonth?.[1] || dayNamedMonth?.[2] || '').toLowerCase()
+  let year, month, day
+  if (/^\d{4}$/.test(text)) { year = Number(text); month = 6; day = 30 }
+  else if (fullYearFirst) [year, month, day] = fullYearFirst.slice(1).map(Number)
+  else if (fullDayFirst) [day, month, year] = fullDayFirst.slice(1).map(Number)
+  else if (yearFirst) { year = Number(yearFirst[1]); month = Number(yearFirst[2]); day = 1 }
+  else if (monthFirst) { year = Number(monthFirst[2]); month = Number(monthFirst[1]); day = 1 }
+  else if (namedMonth || dayNamedMonth) {
+    year = Number(namedMonth?.[3] || dayNamedMonth?.[3])
+    month = months.findIndex((name) => name === monthName || name.slice(0, 3) === monthName || (name === 'september' && monthName === 'sept')) + 1
+    day = Number(namedMonth?.[2] || dayNamedMonth?.[1] || 1)
+    if (!month) return ''
+  } else return ''
+  if (month === 0 && (day === 0 || !fullYearFirst)) { month = 6; day = 30 }
+  else if (day === 0) day = 1
+  const daysInMonth = [31, year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  return year > 0 && month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth[month - 1]
+    ? `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : ''
 }
 
 export const yacReaderMappings = {
@@ -135,11 +150,11 @@ export function fieldsFromMatch(match) {
     issueNumber: issueNumber ? `${Number(issueNumber[1])}${issueNumber[2] === undefined ? '' : `.${issueNumber[2]}`}` : '',
     volume: match.volume || '', issueCount: match.issueCount > 0 ? String(match.issueCount) : '',
     issueTitle: match.title || '', variantName: match.variantName || '',
-    publicationDate: match.publicationDate || '', keyDate: match.keyDate || '', price: match.price || '',
+    publicationDate: normalizeGcdDate(match.publicationDate), keyDate: normalizeGcdDate(match.keyDate), price: match.price || '',
     pageCount: String(match.pageCount || ''),
     editor: combinedValues([match.editing, ...stories.map((story) => story.editing)]
       .map((value) => String(value || '').replace(/\s*\(editor\)/gi, '')), '; ', true),
-    onSaleDate: normalizeGcdDate(match.onSaleDate || match.publicationDate),
+    onSaleDate: normalizeGcdDate(match.onSaleDate) || normalizeGcdDate(match.publicationDate),
     publisher: match.indiciaPublisher || match.publisherName || '',
     imprint: match.publisherName || match.indiciaPublisher || '',
     publisherBrand: match.publisherBrand || '', indiciaPublisher: match.indiciaPublisher || '',
@@ -182,6 +197,9 @@ export function gcdSyncChanges(plan, replaceExisting = false) {
 export function saveGcdProposal(database, comicInfoId, fields) {
   const existingFields = JSON.parse(database.prepare('SELECT fields_json FROM enrichment WHERE comic_info_id = ?').get(comicInfoId)?.fields_json || '{}')
   const savedFields = { ...fields }
+  for (const field of ['onSaleDate', 'publicationDate', 'keyDate']) {
+    if (Object.hasOwn(savedFields, field)) savedFields[field] = normalizeGcdDate(savedFields[field])
+  }
   if (!hasValue(savedFields.gcdIssueId) && hasValue(existingFields.gcdIssueId)) savedFields.gcdIssueId = existingFields.gcdIssueId
   database.prepare('INSERT INTO enrichment (comic_info_id, fields_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(comic_info_id) DO UPDATE SET fields_json = excluded.fields_json, updated_at = excluded.updated_at').run(comicInfoId, JSON.stringify(savedFields))
 }

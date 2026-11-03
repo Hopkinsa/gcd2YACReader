@@ -50,7 +50,7 @@ export function browseGcdRecords(database, { publisherId, seriesId, search = '',
   return { level, records: rows.slice(0, pageSize), page: currentPage, hasMore: rows.length > pageSize }
 }
 
-export async function createGcdMappings({ library, gcd, enrichment, comicId, gcdIssueId, matchFolder = false, selectedComicIds, overwriteExisting = false, resolveFields }) {
+export async function createGcdMappings({ library, gcd, enrichment, comicId, gcdIssueId, matchFolder = false, selectedComicIds, overwriteExisting = false, resolveFields, applyMetadata }) {
   if (!Number.isSafeInteger(comicId) || comicId <= 0 || !Number.isSafeInteger(gcdIssueId) || gcdIssueId <= 0) throw new Error('Select a library comic and a GCD issue.')
   if (selectedComicIds !== undefined && (!matchFolder || !Array.isArray(selectedComicIds) || !selectedComicIds.length || selectedComicIds.some((id) => !Number.isSafeInteger(id) || id <= 0))) throw new Error('Select valid library entries to map by issue.')
   const anchor = library.prepare(`SELECT ci.*, c.id AS comicId, c.parentId AS folderId, c.comicInfoId, c.fileName, c.path
@@ -110,5 +110,6 @@ export async function createGcdMappings({ library, gcd, enrichment, comicId, gcd
       saveGcdProposal(enrichment, proposal.comicInfoId, proposal.fields)
     }
   })()
-  return { ...result, saved: proposals.length }
+  const metadata = overwriteExisting === true && applyMetadata ? await applyMetadata(proposals) : {}
+  return { ...result, saved: proposals.length, ...metadata }
 }

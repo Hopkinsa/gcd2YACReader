@@ -77,20 +77,24 @@ test('proposal deletion is transactional in SQLite and leaves library metadata u
   } finally { database.close() }
 })
 
-test('GCD dates use the first of a known month and June 30 for year-only values', () => {
+test('GCD dates consistently use ISO format with partial-date defaults and calendar validation', () => {
   for (const [input, expected] of [
-    ['2020', '30/06/2020'], ['2020-00-00', '30/06/2020'],
-    ['2020-02', '01/02/2020'], ['02/2020', '01/02/2020'], ['2-2020', '01/02/2020'], ['2020/2', '01/02/2020'], ['2020-02-00', '01/02/2020'],
-    ['February 2020', '01/02/2020'], ['feb 2020', '01/02/2020'], ['Sept. 2020', '01/09/2020'], ['December, 2020', '01/12/2020'],
-    ['2020-02-29', '2020-02-29'], ['29/02/2020', '29/02/2020'], ['February 29, 2020', 'February 29, 2020'],
-    ['[2020]', '30/06/2020'], ['[02/2020]', '01/02/2020'], ['[February] [2020]', '01/02/2020'],
-    ['[2020-02-29]', '2020-02-29'], ['29/[02]/2020', '29/02/2020'], [' [February 29, 2020] ', 'February 29, 2020'], ['[]', ''],
-    ['13/2020', '13/2020'], ['Unknown 2020', 'Unknown 2020'], ['', ''],
+    ['2020', '2020-06-30'], ['2020-00-00', '2020-06-30'],
+    ['2020-02', '2020-02-01'], ['02/2020', '2020-02-01'], ['2-2020', '2020-02-01'], ['2020/2', '2020-02-01'], ['2020-02-00', '2020-02-01'],
+    ['February 2020', '2020-02-01'], ['feb 2020', '2020-02-01'], ['Sept. 2020', '2020-09-01'], ['December, 2020', '2020-12-01'],
+    ['2020-02-29', '2020-02-29'], ['29/02/2020', '2020-02-29'], ['February 29, 2020', '2020-02-29'], ['29 February 2020', '2020-02-29'],
+    ['[2020]', '2020-06-30'], ['[02/2020]', '2020-02-01'], ['[February] [2020]', '2020-02-01'],
+    ['[2020-02-29]', '2020-02-29'], ['29/[02]/2020', '2020-02-29'], [' [February 29, 2020] ', '2020-02-29'], ['[]', ''],
+    ['13/2020', ''], ['Unknown 2020', ''], ['2021-02-29', ''], ['31/04/2020', ''], ['0000', ''], ['', ''],
   ]) {
     assert.equal(fieldsFromMatch({ id: 1, onSaleDate: input }).onSaleDate, expected, input)
     assert.equal(fieldsFromMatch({ id: 1, publicationDate: input }).onSaleDate, expected, `Publication date: ${input}`)
   }
   assert.equal(fieldsFromMatch({ id: 1, onSaleDate: '2020-02-29', publicationDate: 'March 2020' }).onSaleDate, '2020-02-29')
+  assert.equal(fieldsFromMatch({ id: 1, onSaleDate: 'Unknown', publicationDate: 'March 2020' }).onSaleDate, '2020-03-01')
+  const fields = fieldsFromMatch({ id: 1, publicationDate: 'March 2020', keyDate: '2020.03.00' })
+  assert.equal(fields.publicationDate, '2020-03-01')
+  assert.equal(fields.keyDate, '2020-03-01')
 })
 
 test('GCD extraction combines all stories, issue notes, and publication metadata', () => {
@@ -461,7 +465,7 @@ test('native sync updates only approved fields and rolls back stale previews', {
   } finally { database.close() }
 })
 
-test('Electron IPC sync scans fixture databases, backs up writes, and rejects stale plans', { skip: !process.versions.electron || process.env.YAC_GCD_SYNC_INTEGRATION !== '1', timeout: 30000 }, async () => {
+test('Electron IPC sync and explicit mapping/auto-match overwrites back up consistent metadata and protect defaults', { skip: !process.versions.electron || process.env.YAC_GCD_SYNC_INTEGRATION !== '1', timeout: 30000 }, async () => {
   const { default: Database } = await import('better-sqlite3')
   const directory = mkdtempSync(path.join(tmpdir(), 'yac-gcd-sync-'))
   const libraryPath = path.join(directory, 'library.ydb')
@@ -477,7 +481,9 @@ test('Electron IPC sync scans fixture databases, backs up writes, and rejects st
       (5, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0);
     INSERT INTO comic VALUES (1, 1, 'Linked.cbz', '/Linked.cbz'), (2, 2, 'Unique #1.cbz', '/Unique #1.cbz'),
       (3, 3, 'Ambiguous #1.cbz', '/Ambiguous #1.cbz'), (4, 4, 'Deleted link #1.cbz', '/Deleted link #1.cbz'),
-      (5, 5, 'Inferred #001.cbz', '/Inferred #001.cbz'), (6, 1, 'Duplicate linked.cbz', '/Duplicate linked.cbz');`)
+      (5, 5, 'Inferred #001.cbz', '/Inferred #001.cbz'), (6, 1, 'Duplicate linked.cbz', '/Duplicate linked.cbz');
+    ALTER TABLE comic ADD COLUMN parentId INTEGER DEFAULT 1;
+    ALTER TABLE comic_info ADD COLUMN date TEXT;`)
   library.close()
   const gcd = new Database(gcdPath)
   gcd.exec(`CREATE TABLE gcd_issue (id INTEGER PRIMARY KEY, number TEXT, volume TEXT, variant_of_id INTEGER, variant_name TEXT, title TEXT, publication_date TEXT, key_date TEXT, price TEXT, page_count INTEGER, editing TEXT, indicia_frequency TEXT, notes TEXT, isbn TEXT, barcode TEXT, rating TEXT, on_sale_date TEXT, series_id INTEGER, indicia_publisher_id INTEGER, deleted INTEGER DEFAULT 0);
@@ -491,7 +497,12 @@ test('Electron IPC sync scans fixture databases, backs up writes, and rejects st
     INSERT INTO gcd_series (id, name) VALUES (1, 'Linked GCD'), (2, 'Unique'), (3, 'Ambiguous'), (4, 'Ambiguous'), (5, 'Deleted link'), (6, 'Inferred');
     INSERT INTO gcd_issue (id, number, series_id, deleted) VALUES (42, '1', 1, 0), (43, '1', 2, 0), (44, '1', 3, 0), (45, '1', 4, 0), (46, '1', 5, 1), (47, '1', 5, 0), (48, '1', 6, 0);
     INSERT INTO gcd_story_type VALUES (1, 'comic story');
-    INSERT INTO gcd_story (id, type_id, sequence_number, script, issue_id) VALUES (1, 1, 1, 'Writer 42', 42), (2, 1, 1, 'Writer 43', 43), (3, 1, 1, 'Writer 48', 48);`)
+    INSERT INTO gcd_story (id, type_id, sequence_number, script, issue_id) VALUES (1, 1, 1, 'Writer 42', 42), (2, 1, 1, 'Writer 43', 43), (3, 1, 1, 'Writer 48', 48);
+    INSERT INTO gcd_publisher VALUES (1, 'GCD publisher');
+    INSERT INTO gcd_indicia_publisher VALUES (1, 'GCD indicia publisher');
+    UPDATE gcd_series SET publisher_id = 1;
+    UPDATE gcd_issue SET indicia_publisher_id = 1, on_sale_date = '29/02/2020' WHERE id = 42;
+    ALTER TABLE gcd_issue ADD COLUMN sort_code INTEGER DEFAULT 0;`)
   gcd.close()
   const enrichment = new Database(path.join(directory, 'enrichment.db'))
   enrichment.exec('CREATE TABLE enrichment (comic_info_id INTEGER PRIMARY KEY, fields_json TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)')
@@ -503,15 +514,18 @@ test('Electron IPC sync scans fixture databases, backs up writes, and rejects st
   writeFileSync(launcherPath, `
     import { createRequire } from 'node:module';
     import { writeFileSync } from 'node:fs';
+    process.stderr.write('Fixture launcher started\\n');
     const require = createRequire(${JSON.stringify(import.meta.url)});
     const { app, BrowserWindow } = require('electron');
     const Database = require('better-sqlite3');
     app.setPath('userData', ${JSON.stringify(directory)});
     await import(${JSON.stringify(new URL('./main.mjs', import.meta.url).href)});
-    await app.whenReady();
+    process.stderr.write('Application imported\\n');
+    app.whenReady().then(async () => {
+    process.stderr.write('Electron ready\\n');
     const window = BrowserWindow.getAllWindows()[0];
     window.hide();
-    const invoke = (code) => window.webContents.executeJavaScript(code);
+    const invoke = (code) => { process.stderr.write(code + '\\n'); return window.webContents.executeJavaScript(code); };
     try {
       await window.webContents.loadURL('data:text/html,<html>Fixture ready</html>');
       const plan = await invoke('window.libraryApi.previewGcdSync()');
@@ -530,10 +544,25 @@ test('Electron IPC sync scans fixture databases, backs up writes, and rejects st
       const afterStale = database.prepare('SELECT * FROM comic_info WHERE id = 1').get();
       const proposals = new Database(${JSON.stringify(path.join(directory, 'enrichment.db'))});
       const savedProposal = JSON.parse(proposals.prepare('SELECT fields_json FROM enrichment WHERE comic_info_id = 1').get().fields_json);
+      await invoke('window.libraryApi.updateComicMetadata(1, { publisher: "Manual publisher", date: "1/2/2020" })');
+      const afterManual = database.prepare('SELECT * FROM comic_info WHERE id = 1').get();
+      await invoke('window.libraryApi.createMappings({ comicId: 1, gcdIssueId: 42 })');
+      const afterDefaultMapping = database.prepare('SELECT * FROM comic_info WHERE id = 1').get();
+      const mappingOverwrite = await invoke('window.libraryApi.createMappings({ comicId: 1, gcdIssueId: 42, overwriteExisting: true })');
+      const afterMappingOverwrite = database.prepare('SELECT * FROM comic_info WHERE id = 1').get();
+      const selectedOverwrite = await invoke('window.libraryApi.createMappings({ comicId: 1, gcdIssueId: 42, matchFolder: true, selectedComicIds: [2], overwriteExisting: true })');
+      const afterSelectedOverwrite = database.prepare('SELECT * FROM comic_info WHERE id = 2').get();
+      await invoke('window.libraryApi.updateComicMetadata(1, { publisher: "Manual publisher", date: "1/2/2020" })');
+      const autoDefault = await invoke('window.libraryApi.autoMatchExact({ comicInfoIds: [1] })');
+      const afterDefaultAuto = database.prepare('SELECT * FROM comic_info WHERE id = 1').get();
+      const autoOverwrite = await invoke('window.libraryApi.autoMatchExact({ comicInfoIds: [1], overwriteExisting: true })');
+      const afterAutoOverwrite = database.prepare('SELECT * FROM comic_info WHERE id = 1').get();
+      const overwrittenProposal = JSON.parse(proposals.prepare('SELECT fields_json FROM enrichment WHERE comic_info_id = 1').get().fields_json);
       proposals.close(); database.close();
-      writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({ plan, before, filled, afterFill, replaced, afterReplace, staleError, afterStale, savedProposal }));
+      writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({ plan, before, filled, afterFill, replaced, afterReplace, staleError, afterStale, savedProposal, afterManual, afterDefaultMapping, mappingOverwrite, afterMappingOverwrite, selectedOverwrite, afterSelectedOverwrite, autoDefault, afterDefaultAuto, autoOverwrite, afterAutoOverwrite, overwrittenProposal }));
     } catch (error) { writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({ error: error.stack })); process.exitCode = 1; }
     app.quit();
+    });
   `)
   try {
     const environment = { ...process.env, YAC_GCD_LIBRARY_PATH: libraryPath, YAC_GCD_DATABASE_PATH: gcdPath, VITE_DEV_SERVER_URL: 'data:text/html,<html>Fixture</html>' }
@@ -559,5 +588,27 @@ test('Electron IPC sync scans fixture databases, backs up writes, and rejects st
     assert.match(result.staleError, /changed since the preview/)
     assert.equal(result.afterStale.writer, 'External writer')
     assert.equal(result.savedProposal.series, 'Saved proposal')
+    assert.equal(result.afterManual.date, '2020-02-01')
+    assert.equal(result.afterDefaultMapping.publisher, 'Manual publisher')
+    assert.equal(result.afterDefaultMapping.date, '2020-02-01')
+    assert.equal(result.autoDefault.proposed, 0)
+    assert.equal(result.afterDefaultAuto.publisher, 'Manual publisher')
+    assert.equal(result.afterDefaultAuto.date, '2020-02-01')
+    assert.equal(result.autoOverwrite.proposed, 1)
+    for (const [outcome, comic] of [[result.mappingOverwrite, result.afterMappingOverwrite], [result.selectedOverwrite, result.afterSelectedOverwrite], [result.autoOverwrite, result.afterAutoOverwrite]]) {
+      assert.equal(outcome.updatedComics, 1)
+      assert.equal(comic.publisher, 'GCD indicia publisher')
+      assert.equal(comic.date, '2020-02-29')
+      assert.equal(comic.writer, 'Writer 42')
+      assert.ok(existsSync(outcome.backupPath))
+    }
+    assert.equal(result.afterMappingOverwrite.read, 1)
+    assert.equal(result.afterAutoOverwrite.read, 1)
+    assert.equal(result.overwrittenProposal.onSaleDate, '2020-02-29')
+    for (const outcome of [result.mappingOverwrite, result.autoOverwrite]) {
+      const original = new Database(outcome.backupPath, { readonly: true })
+      assert.equal(original.prepare('SELECT publisher FROM comic_info WHERE id = 1').get().publisher, 'Manual publisher')
+      original.close()
+    }
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })
