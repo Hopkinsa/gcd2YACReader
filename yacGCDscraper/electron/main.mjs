@@ -233,13 +233,13 @@ function loadLibrary(filters) {
     if (filters.reading === 'read') where.push('ci.read = 1')
     if (filters.reading === 'unread') where.push('COALESCE(ci.read, 0) = 0')
     if (filters.gcdStatus === 'pending') {
-      const updatedIds = enrichment.prepare('SELECT comic_info_id FROM enrichment').all().map((row) => row.comic_info_id)
-      if (updatedIds.length) {
-        where.push(`ci.id NOT IN (${updatedIds.map(() => '?').join(', ')})`)
-        parameters.push(...updatedIds)
-      }
+      database.prepare('ATTACH DATABASE ? AS gcd_enrichment').run(enrichment.name)
+      where.push('NOT EXISTS (SELECT 1 FROM gcd_enrichment.enrichment e WHERE e.comic_info_id = ci.id)')
     }
-    if (filters.publisher && filters.publisher !== 'all') { where.push('ci.publisher = ?'); parameters.push(filters.publisher) }
+    if (filters.publisher && filters.publisher === 'missing') { where.push("TRIM(COALESCE(ci.publisher, '')) = ''") }
+    else {
+      if (filters.publisher && filters.publisher !== 'all') { where.push('ci.publisher = ?'); parameters.push(filters.publisher) }
+    }
     const condition = where.length ? where.join(' AND ') : '1 = 1'
     const total = database.prepare(`SELECT COUNT(*) AS total FROM comic c JOIN comic_info ci ON ci.id = c.comicInfoId WHERE ${condition}`).get(...parameters).total
     const paginated = selectedFolderId === allComicsFolderId
@@ -698,7 +698,8 @@ app.whenReady().then(() => {
     const gcd = new Database(gcdPath, { readonly: true, fileMustExist: true })
     const enrichment = enrichmentDatabase()
     try {
-      return await createGcdMappings({ ...options, library, gcd, enrichment,
+      return await createGcdMappings({
+        ...options, library, gcd, enrichment,
         applyMetadata: applyGcdProposalMetadata,
         resolveFields: (issueId) => {
           const match = gcd.prepare(`${gcdIssueSelect} WHERE i.id = ? AND +i.deleted = 0 AND +s.deleted = 0`).get(issueId)

@@ -332,7 +332,7 @@ function PathExtractionConfirmation({ folderName, onCancel, onContinue }: { fold
     </section>
   </div>
 }
- 
+
  function AutoMatchProgressDialog({ progress }: { progress: AutoMatchProgress | null }) {
    const scanned = progress?.scanned ?? 0
    const total = progress?.total ?? 0
@@ -1052,11 +1052,12 @@ function App() {
           </div>
         </header>
         <div className="panel-toggles" aria-label="Workspace panels"><button className={panels.folders ? 'active' : ''} type="button" onClick={() => setPanels((current) => ({ ...current, folders: !current.folders }))}>Folders</button><button className={panels.covers ? 'active' : ''} type="button" onClick={() => setPanels((current) => ({ ...current, covers: !current.covers }))}>Covers</button><button className={panels.list ? 'active' : ''} type="button" onClick={() => setPanels((current) => ({ ...current, list: !current.list }))}>List</button><button className={panels.details ? 'active' : ''} type="button" onClick={() => setPanels((current) => ({ ...current, details: !current.details }))}>Details</button></div>
+        <div className="library-overview">
         {showFilters && <div className="filter-bar">
           <label>Metadata<select value={filters.metadata} onChange={(event) => updateFilter({ metadata: event.target.value })}><option value="all">Everything</option><option value="missing">Missing title</option><option value="complete">Has title</option></select></label>
           <label>Reading<select value={filters.reading} onChange={(event) => updateFilter({ reading: event.target.value })}><option value="all">All statuses</option><option value="unread">Unread</option><option value="read">Read</option></select></label>
           <label>GCD status<select value={filters.gcdStatus} onChange={(event) => updateFilter({ gcdStatus: event.target.value })}><option value="all">All comics</option><option value="pending">Hide GCD-updated</option></select></label>
-          <label>Publisher<select value={filters.publisher} onChange={(event) => updateFilter({ publisher: event.target.value })}><option value="all">All publishers</option>{data?.publishers.map((publisher) => <option key={publisher} value={publisher}>{publisher}</option>)}</select></label>
+          <label>Publisher<select value={filters.publisher} onChange={(event) => updateFilter({ publisher: event.target.value })}><option value="all">All publishers</option><option value="missing">Missing publishers</option>{data?.publishers.map((publisher) => <option key={publisher} value={publisher}>{publisher}</option>)}</select></label>
           <button className="text-button" type="button" onClick={() => updateFilter({ metadata: 'all', reading: 'all', gcdStatus: 'all', publisher: 'all' })}><X size={15} />Clear</button>
         </div>}
         <div className="content-header"><div><nav className="breadcrumb" aria-label="Library path"><button type="button" onClick={() => selectFolder(allComicsFolderId)}>All comics</button>{folderBreadcrumbs.map((folder) => <span key={folder.id}><span aria-hidden="true">/</span><button type="button" onClick={() => selectFolder(folder.id)}>{folder.name}</button></span>)}</nav><h1>{filters.folderId === allComicsFolderId ? 'All comics' : selectedFolder?.name}</h1><p className="count">{data?.total.toLocaleString() ?? 0} comics found</p></div><div className="content-actions">{selectedFolder && <button className="auto-match-branch-button" type="button" disabled={!libraryApi || pathExtracting} onClick={() => setPathExtractionConfirmationOpen(true)}><WandSparkles size={16} />Extract from paths</button>}{selectedFolder && <button className={`auto-match-branch-button ${selectedAutoMatchTarget ? 'selected-action-button' : ''}`} type="button" disabled={!libraryApi || autoMatching} onClick={() => openAutoMatch(selectedAutoMatchTarget ?? { folderId: selectedFolder.id, label: selectedFolder.name, isLibrary: selectedFolder.id === libraryRootFolderId })}><WandSparkles size={16} />{selectedAutoMatchTarget ? 'Auto-match selected' : 'Auto-match'}</button>}{selectedAutoMatchTarget && selectedComics.length > 1 && <button className="auto-match-branch-button selected-action-button" type="button" disabled={!libraryApi} onClick={() => { setBulkEditorError(null); setBulkEditorOpen(true) }}><Pencil size={16} />Bulk edit ({selectedComics.length})</button>}</div></div>
@@ -1067,6 +1068,7 @@ function App() {
             <div className="comic-caption"><b>{comic.title || comic.fileName.replace(/\.[^.]+$/, '')}</b><span>{[comic.publisher, comic.number && `#${comic.number}`].filter(Boolean).join(' · ') || 'Metadata pending'}</span></div>
           </button>)}</div>}
         {data && <LibraryProposalSummary comics={data.comics} />}
+        </div>
         {data && <LibraryList comics={sortedComics} selectedComicIds={selectedComicIds} advancedToolsVisible={advancedToolsVisible} drafts={rowDrafts} sort={librarySort} onSort={updateLibrarySort} onSelect={selectComic} onSelectAll={selectAllRows} onDraftChange={updateRowDraft} onCommit={(comic, field, value) => void commitRowEdit(comic, field, value)} onContextMenu={openRowContext} />}
         {filters.folderId === allComicsFolderId && data && data.total > data.pageSize && <nav className="pagination" aria-label="Comic pages"><button type="button" title="Previous page" aria-label="Previous page" disabled={data.page === 1} onClick={() => updateFilter({ page: data.page - 1 })}><ChevronLeft size={17} /></button><span>Page {data.page} of {pageCount}</span><button type="button" title="Next page" aria-label="Next page" disabled={data.page === pageCount} onClick={() => updateFilter({ page: data.page + 1 })}><ChevronRight size={17} /></button></nav>}
       </section>
