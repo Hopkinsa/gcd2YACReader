@@ -36,7 +36,7 @@ function createHarness() {
   return { update, writes, backups }
 }
 
-test('bulk auto-increments follow the visible list sort, not loaded or selection order', async () => {
+test('bulk auto-increments follow the server-sorted visible list, not selection order', async () => {
   const app = ts.createSourceFile('App.tsx', readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const initializers = new Map()
   function visit(node) {
@@ -55,7 +55,8 @@ test('bulk auto-increments follow the visible list sort, not loaded or selection
   ]
   for (const [direction, expectedIds] of [['ascending', [30, 20, 10]], ['descending', [10, 20, 30]]]) {
     const selected = runInNewContext(`const sortedComics = ${initializers.get('sortedComics')}; ${initializers.get('selectedComics')}`, {
-      data: { comics }, librarySort: { field: 'number', direction }, selectedComicIds: new Set([2, 1, 3]),
+      data: { comics: [...comics].sort((left, right) => (direction === 'ascending' ? 1 : -1) * (Number(left.number) - Number(right.number))) },
+      selectedComicIds: new Set([2, 1, 3]),
     })
     const { update, writes } = createHarness()
     await update(selected.map((comic) => comic.comicInfoId), { arcNumber: '5', alternateNumber: '10' }, ['arcNumber', 'alternateNumber'])

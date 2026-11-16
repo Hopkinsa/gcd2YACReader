@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { canonicalGcdCandidates } from './gcd-match-dedup.mjs'
 import { extractPathMetadata } from './path-metadata.mjs'
 import { browseGcdRecords, createGcdMappings } from './mapping-browser.mjs'
+import { createLibraryReader } from './library-load.mjs'
 import { applyGcdSyncChanges, buildGcdSyncPlan, extractGcdFields, fieldsFromMatch, gcdSyncChanges, listGcdProposals, normalizeGcdDate, persistGcdLinks, removeGcdProposals, resolveGcdSyncCandidate, saveGcdProposal, yacReaderMappings } from './gcd-sync.mjs'
 
 const appDirectory = path.dirname(fileURLToPath(import.meta.url))
@@ -18,6 +19,7 @@ const coversPath = process.env.YAC_GCD_COVERS_PATH || path.join(path.dirname(lib
 const libraryRootFolderId = 1
 const allComicsFolderId = 0
 const defaultPageSize = 120
+const libraryReader = createLibraryReader({ openLibrary, enrichmentDatabase, libraryPath, allComicsFolderId, libraryRootFolderId, defaultPageSize })
 const gcdStoryStatementCache = new WeakMap()
 const pendingGcdSyncPlans = new Map()
 const gcdSyncBusy = new Set()
@@ -215,60 +217,16 @@ function findGcdMatches(comic, parameters, suppliedDatabase, includeStories = tr
 }
 
 function loadLibrary(filters) {
-  const database = openLibrary()
-  const enrichment = enrichmentDatabase()
-  try {
-    const libraryColumns = new Set(database.prepare('PRAGMA table_info(comic_info)').all().map((column) => column.name))
-    const folders = database.prepare('SELECT id, parentId, name, path, numChildren FROM folder ORDER BY path COLLATE NOCASE').all()
-    const selectedFolderId = Number(filters.folderId)
-    const where = selectedFolderId === allComicsFolderId ? [] : ['c.parentId = ?']
-    const parameters = selectedFolderId === allComicsFolderId ? [] : [Number.isInteger(selectedFolderId) && selectedFolderId > 0 ? selectedFolderId : libraryRootFolderId]
-    if (filters.search?.trim()) {
-      const query = `%${filters.search.trim()}%`
-      where.push('(c.fileName LIKE ? COLLATE NOCASE OR ci.title LIKE ? COLLATE NOCASE OR ci.number LIKE ? COLLATE NOCASE OR ci.publisher LIKE ? COLLATE NOCASE OR ci.writer LIKE ? COLLATE NOCASE OR ci.series LIKE ? COLLATE NOCASE)')
-      parameters.push(query, query, query, query, query, query)
-    }
-    if (filters.metadata === 'missing') where.push("TRIM(COALESCE(ci.title, '')) = ''")
-    if (filters.metadata === 'complete') where.push("TRIM(COALESCE(ci.title, '')) != ''")
-    if (filters.reading === 'read') where.push('ci.read = 1')
-    if (filters.reading === 'unread') where.push('COALESCE(ci.read, 0) = 0')
-    if (filters.gcdStatus === 'pending') {
-      database.prepare('ATTACH DATABASE ? AS gcd_enrichment').run(enrichment.name)
-      where.push('NOT EXISTS (SELECT 1 FROM gcd_enrichment.enrichment e WHERE e.comic_info_id = ci.id)')
-    }
-    if (filters.publisher && filters.publisher === 'missing') { where.push("TRIM(COALESCE(ci.publisher, '')) = ''") }
-    else {
-      if (filters.publisher && filters.publisher !== 'all') { where.push('ci.publisher = ?'); parameters.push(filters.publisher) }
-    }
-    const condition = where.length ? where.join(' AND ') : '1 = 1'
-    const total = database.prepare(`SELECT COUNT(*) AS total FROM comic c JOIN comic_info ci ON ci.id = c.comicInfoId WHERE ${condition}`).get(...parameters).total
-    const paginated = selectedFolderId === allComicsFolderId
-    const pageSize = paginated ? Math.max(24, Math.min(Number(filters.pageSize) || defaultPageSize, 240)) : Math.max(total, 1)
-    const page = paginated ? Math.max(1, Math.min(Number(filters.page) || 1, Math.max(1, Math.ceil(total / pageSize)))) : 1
-    const proposalFieldsByComicInfoId = new Map(enrichment.prepare('SELECT comic_info_id, fields_json FROM enrichment').all().flatMap((row) => {
-      try {
-        const fields = JSON.parse(row.fields_json)
-        return fields && typeof fields === 'object' && !Array.isArray(fields) ? [[row.comic_info_id, fields]] : []
-      } catch {
-        return []
-      }
+  const { libraryColumns, ...result } = libraryReader.load(filters)
+  const comics = result.comics.map((comic) => {
+    const pendingFields = Object.fromEntries(Object.entries(yacReaderMappings).flatMap(([enrichmentField, libraryField]) => {
+      const value = enrichmentField === 'onSaleDate' ? normalizeGcdDate(comic.proposedFields[enrichmentField]) : comic.proposedFields[enrichmentField]
+      const validIssueNumber = enrichmentField !== 'issueNumber' || Boolean(normalizeIssueNumber(value))
+      return hasValue(value) && validIssueNumber && libraryColumns.has(libraryField) && !hasValue(comic[libraryField]) ? [[enrichmentField, String(value)]] : []
     }))
-    const orderBy = filters.sort === 'path' ? 'c.path COLLATE NOCASE, c.fileName COLLATE NOCASE, c.id' : "COALESCE(NULLIF(ci.title, ''), c.fileName) COLLATE NOCASE"
-    const comics = database.prepare(`SELECT ci.*, c.id, c.comicInfoId, c.fileName, c.path FROM comic c JOIN comic_info ci ON ci.id = c.comicInfoId WHERE ${condition} ORDER BY ${orderBy}${paginated ? ' LIMIT ? OFFSET ?' : ''}`).all(...parameters, ...(paginated ? [pageSize, (page - 1) * pageSize] : [])).map((comic) => {
-      const proposedFields = proposalFieldsByComicInfoId.get(comic.comicInfoId) || {}
-      const pendingFields = Object.fromEntries(Object.entries(yacReaderMappings).flatMap(([enrichmentField, libraryField]) => {
-        const value = enrichmentField === 'onSaleDate' ? normalizeGcdDate(proposedFields[enrichmentField]) : proposedFields[enrichmentField]
-        const validIssueNumber = enrichmentField !== 'issueNumber' || Boolean(normalizeIssueNumber(value))
-        return hasValue(value) && validIssueNumber && libraryColumns.has(libraryField) && !hasValue(comic[libraryField]) ? [[enrichmentField, String(value)]] : []
-      }))
-      return { ...comic, proposedFields, pendingFields, coverUrl: coverUrl(comic.hash) }
-    })
-    const publishers = database.prepare("SELECT DISTINCT publisher FROM comic_info WHERE TRIM(COALESCE(publisher, '')) != '' ORDER BY publisher COLLATE NOCASE LIMIT 500").all().map((row) => row.publisher)
-    return { folders, comics, total, page, pageSize, publishers, libraryPath }
-  } finally {
-    enrichment.close()
-    database.close()
-  }
+    return { ...comic, pendingFields, coverUrl: coverUrl(comic.hash) }
+  })
+  return { ...result, comics }
 }
 
 function getComicMetadata(comicId) {
@@ -780,3 +738,4 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+app.on('will-quit', () => libraryReader.close())

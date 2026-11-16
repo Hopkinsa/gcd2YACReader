@@ -11,6 +11,7 @@ The application is not a replacement YACReader database. `library.ydb` remains t
 | Component | Location | Responsibility |
 | --- | --- | --- |
 | Electron main process | `electron/main.mjs` | Opens SQLite databases, checks cover files, matches GCD records, saves enrichment proposals, creates backups, and applies native library updates. |
+| Library reader | `electron/library-load.mjs` | Reuses the browsing connection and prepared queries, caches naturally sorted result IDs, and loads page metadata and proposals together. |
 | GCD sync planner | `electron/gcd-sync.mjs` | Separates missing and differing native metadata, resolves saved-ID versus exact-match policy, and applies approved values with stale-preview rollback protection. |
 | Electron preload bridge | `electron/preload.cjs` | Exposes a restricted `window.libraryApi` IPC interface to the renderer. |
 | React renderer | `src/App.tsx` | Renders the library browser, filters, matching review, proposal editor, update preview, and controls. |
@@ -43,6 +44,8 @@ By default, all paths are resolved relative to the project source tree:
 | Proposals | Electron user-data directory, `enrichment.db` | Not currently configurable |
 
 Cover image filenames are based on the YACReader `comic_info.hash` field. For hash `abc123...`, the app looks for `covers/abc123....jpg`. The main process returns an image URL only if that JPEG exists. Missing images and image load failures retain the visual placeholder.
+
+Library browsing retains a read-only library connection with the proposal database attached. Each load uses a short read transaction; SQLite `data_version` checks invalidate cached folders, publishers, schema, and sorted IDs after relevant external commits. File-identity checks reopen the connection if either database is replaced, and application shutdown closes it. Only the current filter/sort result's IDs and a bounded set of prepared statements are retained. Sorting happens before pagination; subsequent page requests reuse the sorted IDs and read only that page's full records and proposals. Browsing does not create indexes or change library data.
 
 ## User Workflow
 

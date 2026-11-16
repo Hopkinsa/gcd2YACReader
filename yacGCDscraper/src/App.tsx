@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 import './App.css'
 import MappingWindow from './MappingWindow'
-import type { GcdProposal } from './library-api'
+import type { GcdProposal, LibrarySortField } from './library-api'
 
 type FolderRecord = {
   id: number
@@ -78,6 +78,8 @@ type Filters = {
   reading: string
   publisher: string
   gcdStatus: string
+  sort: LibrarySortField
+  sortDirection: 'ascending' | 'descending'
 }
 
 type Enrichment = Record<string, string>
@@ -101,7 +103,6 @@ type PackageImportResult = { canceled: boolean; imported: number; filePath?: str
 type AutoMatchRefinement = { title: string; volume: string; publisher: string }
 type AutoMatchTarget = { label: string; isLibrary: boolean; folderId?: number; comicInfoIds?: number[] }
 type MatchParameters = { title: string; number: string; volume: string }
-type LibrarySortField = 'path' | 'series' | 'title' | 'number' | 'volume' | 'publisher' | 'date'
 type EditableRowField = 'series' | 'title' | 'number' | 'volume' | 'publisher'
 type BulkEditableField = EditableRowField | 'storyArc' | 'arcNumber' | 'alternateSeries' | 'alternateNumber'
 type LibrarySort = { field: LibrarySortField; direction: 'ascending' | 'descending' }
@@ -494,7 +495,7 @@ function HelpPage({ onClose }: { onClose: () => void }) {
 
 function App() {
   const libraryApi = window.libraryApi
-  const [filters, setFilters] = useState<Filters>({ folderId: allComicsFolderId, page: 1, pageSize: 120, search: '', metadata: 'all', reading: 'all', publisher: 'all', gcdStatus: 'all' })
+  const [filters, setFilters] = useState<Filters>({ folderId: allComicsFolderId, page: 1, pageSize: 120, search: '', metadata: 'all', reading: 'all', publisher: 'all', gcdStatus: 'all', sort: 'path', sortDirection: 'ascending' })
   const [data, setData] = useState<LibraryData | null>(null)
   const [libraryRevision, setLibraryRevision] = useState(0)
   const [selectedComic, setSelectedComic] = useState<Comic | null>(null)
@@ -553,17 +554,14 @@ function App() {
   const [matchError, setMatchError] = useState<string | null>(null)
   const [overwriteExistingProposals, setOverwriteExistingProposals] = useState(false)
   const [panels, setPanels] = useState({ folders: true, covers: true, list: true, details: true })
-  const [librarySort, setLibrarySort] = useState<LibrarySort>({ field: 'path', direction: 'ascending' })
+  const librarySort: LibrarySort = { field: filters.sort, direction: filters.sortDirection }
   const [rowDrafts, setRowDrafts] = useState<RowDrafts>({})
   const [rowContext, setRowContext] = useState<{ comic: Comic; x: number; y: number } | null>(null)
   const [bulkEditorOpen, setBulkEditorOpen] = useState(false)
   const [bulkEditorSaving, setBulkEditorSaving] = useState(false)
   const [bulkEditorError, setBulkEditorError] = useState<string | null>(null)
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<Comic | null>(null)
-  const sortedComics = [...(data?.comics ?? [])].sort((left, right) => {
-    const comparison = String(left[librarySort.field] ?? '').localeCompare(String(right[librarySort.field] ?? ''), undefined, { numeric: true, sensitivity: 'base' })
-    return librarySort.direction === 'ascending' ? comparison : -comparison
-  })
+  const sortedComics = data?.comics ?? []
 
   useEffect(() => {
     let cancelled = false
@@ -931,7 +929,12 @@ function App() {
     setSelectionAnchorId(comic.id)
     setSelectedComic(next.has(comic.id) ? comic : data?.comics.find((candidate) => next.has(candidate.id)) ?? null)
   }
-  const updateLibrarySort = (field: LibrarySortField) => setLibrarySort((current) => current.field === field ? { field, direction: current.direction === 'ascending' ? 'descending' : 'ascending' } : { field, direction: 'ascending' })
+  const updateLibrarySort = (field: LibrarySortField) => setFilters((current) => ({
+    ...current,
+    sort: field,
+    sortDirection: current.sort === field && current.sortDirection === 'ascending' ? 'descending' : 'ascending',
+    page: 1,
+  }))
   const selectAllRows = () => {
     if (!advancedToolsVisible || !sortedComics.length) return
     const comic = sortedComics.find((candidate) => candidate.id === selectedComic?.id) ?? sortedComics[0]

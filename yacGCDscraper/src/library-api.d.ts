@@ -1,3 +1,5 @@
+export type LibrarySortField = 'path' | 'series' | 'title' | 'number' | 'volume' | 'publisher' | 'date'
+
 export type GcdBrowserRecord = {
   id: number
   name?: string
@@ -26,7 +28,7 @@ export type GcdProposal = {
 declare global {
   interface Window {
     libraryApi: {
-      loadLibrary: (filters: { folderId: number; page: number; pageSize: number; search: string; metadata: string; reading: string; publisher: string; gcdStatus: string; sort?: 'path' | 'title' }) => Promise<unknown>
+      loadLibrary: (filters: { folderId: number; page: number; pageSize: number; search: string; metadata: string; reading: string; publisher: string; gcdStatus: string; sort?: LibrarySortField; sortDirection?: 'ascending' | 'descending' }) => Promise<unknown>
       browseGcd: (options: { publisherId?: number; seriesId?: number; search?: string; page?: number }) => Promise<{ level: 'publishers' | 'series' | 'issues'; records: GcdBrowserRecord[]; page: number; hasMore: boolean }>
       createMappings: (options: { comicId: number; gcdIssueId: number; matchFolder?: boolean; selectedComicIds?: number[]; overwriteExisting?: boolean }) => Promise<{ scanned: number; saved: number; skippedExisting: number; ambiguous: number; unmatched: number; failed: number; updatedComics?: number; updatedFields?: number; backupPath?: string | null }>
       getComicMetadata: (comicId: number) => Promise<Record<string, unknown> | null>
